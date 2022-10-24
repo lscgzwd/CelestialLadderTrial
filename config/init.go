@@ -1,8 +1,10 @@
 package config
 
 import (
+	"encoding/json"
 	"flag"
-	"io/ioutil"
+	"fmt"
+	"io"
 	"os"
 	"path"
 	"strings"
@@ -42,11 +44,17 @@ func init() {
 	// load json config file
 	jsonFile, err := os.OpenFile(c, os.O_RDONLY, 0755)
 	if nil != err {
-		panic(err)
+		fmt.Printf("读取配置文件错误：%+v", err)
+		os.Exit(1)
 	}
-	jsonData, err := ioutil.ReadAll(jsonFile)
+	jsonData, err := io.ReadAll(jsonFile)
 	if nil != err {
-		panic(err)
+		fmt.Printf("读取配置文件错误：%+v", err)
+		os.Exit(1)
 	}
-
+	err = json.Unmarshal(jsonData, Config)
+	if nil != err {
+		fmt.Printf("解析配置文件错误：%+v", err)
+		os.Exit(1)
+	}
 }
