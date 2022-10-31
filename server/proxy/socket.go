@@ -2,14 +2,15 @@ package proxy
 
 import (
 	"fmt"
-	"github.com/pkg/errors"
 	"io"
 	"net"
+	"time"
+
+	"github.com/pkg/errors"
 	"proxy/config"
+	"proxy/server/common"
 	"proxy/utils/context"
 	"proxy/utils/logger"
-	"strconv"
-	"time"
 )
 
 // https://www.ietf.org/rfc/rfc1928.txt
@@ -44,7 +45,29 @@ type SocketServer struct {
 	Password string
 }
 
-func (s *SocketServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWriter, string, error) {
+func (s *SocketServer) Start(l net.Listener) {
+	conn, err := l.Accept()
+	go func() {
+		defer conn.Close()
+		gCtx := context.NewContext()
+		if nil != err {
+			logger.Error(gCtx, map[string]interface{}{
+				"action":    config.ActionRequestBegin,
+				"errorCode": logger.ErrCodeHandshake,
+				"error":     err,
+			})
+		}
+		wConn, target, err := s.Handshake(gCtx, conn)
+		if nil != err {
+			logger.Error(gCtx, map[string]interface{}{
+				"action":    config.ActionRequestBegin,
+				"errorCode": logger.ErrCodeHandshake,
+				"error":     err,
+			})
+		}
+	}()
+}
+func (s *SocketServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWriter, *common.TargetAddr, error) {
 	// 在函数退出前，执行defer
 	// 捕捉异常后，程序不会异常退出
 	defer func() {
@@ -60,7 +83,7 @@ func (s *SocketServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWr
 	}()
 	// Set handshake timeout 4 seconds
 	if err := conn.SetReadDeadline(time.Now().Add(time.Second * 4)); err != nil {
-		return nil, "", err
+		return nil, nil, err
 	}
 	defer conn.SetReadDeadline(time.Time{})
 
@@ -70,58 +93,61 @@ func (s *SocketServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWr
 	// Read hello message
 	n, err := conn.Read(buf)
 	if err != nil || n == 0 {
-		return nil, "", fmt.Errorf("failed to read hello: %w", err)
+		return nil, nil, fmt.Errorf("failed to read hello: %w", err)
 	}
 	version := buf[0]
 	if version != Version5 {
-		return nil, "", fmt.Errorf("unsupported socks version %v", version)
+		return nil, nil, fmt.Errorf("unsupported socks version %v", version)
 	}
 
 	// Write hello response
 	// TODO: Support Auth
 	_, err = conn.Write([]byte{Version5, AuthNone})
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to write hello response: %w", err)
+		return nil, nil, fmt.Errorf("failed to write hello response: %w", err)
 	}
 
 	// Read command message
 	n, err = conn.Read(buf)
 	if err != nil || n < 7 { // Shortest length is 7
-		return nil, "", fmt.Errorf("failed to read command: %w", err)
+		return nil, nil, fmt.Errorf("failed to read command: %w", err)
 	}
 	cmd := buf[1]
 	if cmd != CmdConnect {
-		return nil, "", fmt.Errorf("unsuppoted command %v", cmd)
+		return nil, nil, fmt.Errorf("unsuppoted command %v", cmd)
 	}
-	var addr string
+	addr := &common.TargetAddr{}
 	l := 2
 	off := 4
 	switch buf[3] {
 	case ATypIP4:
 		l += net.IPv4len
-		addr = string(buf[off:])
+		addr.IP = make(net.IP, net.IPv4len)
 	case ATypIP6:
 		l += net.IPv6len
-		addr = string(buf[off:])
+		addr.IP = make(net.IP, net.IPv6len)
 	case ATypDomain:
 		l += int(buf[4])
 		off = 5
-		addr = string(buf[off : off+l-2])
 	default:
-		return nil, "", fmt.Errorf("unknown address type %v", buf[3])
+		return nil, nil, fmt.Errorf("unknown address type %v", buf[3])
 	}
 
 	if len(buf[off:]) < l {
-		return nil, "", errors.New("short command request")
+		return nil, nil, errors.New("short command request")
 	}
-
-	port := int(buf[off+l-2])<<8 | int(buf[off+l-1])
+	if addr.IP != nil {
+		copy(addr.IP, buf[off:])
+	} else {
+		addr.Name = string(buf[off : off+l-2])
+	}
+	addr.Port = int(buf[off+l-2])<<8 | int(buf[off+l-1])
 
 	// Write command response
 	_, err = conn.Write([]byte{Version5, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to write command response: %w", err)
+		return nil, nil, fmt.Errorf("failed to write command response: %w", err)
 	}
 
-	return conn, net.JoinHostPort(addr, strconv.FormatInt(int64(port), 10)), err
+	return conn, addr, err
 }

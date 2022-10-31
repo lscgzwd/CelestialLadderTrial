@@ -23,7 +23,13 @@ const (
 	ActionSocketOperate = "SocketOperate"
 	ActionCronOperate   = "CronOperate"
 )
-
+const (
+	_ = iota
+	ServerTypeSocket
+	ServerTypeHttp
+	ServerTypeTLS
+	ServerTypeWSS
+)
 const (
 	TimeFormat  = "2006-01-02 15:04:05"
 	ProjectCode = 1001

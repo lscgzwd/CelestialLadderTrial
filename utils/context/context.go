@@ -3,7 +3,10 @@ package context
 import (
 	"sync"
 	"time"
+
+	"github.com/satori/go.uuid"
 )
+
 // Context used to transfer data
 type Context struct {
 	// This mutex protect Keys map
@@ -12,6 +15,7 @@ type Context struct {
 	// Keys is a key/value pair exclusively for the context of each request.
 	Keys map[string]interface{}
 }
+
 /************************************/
 /********** CONTEXT CREATION ********/
 /************************************/
@@ -30,6 +34,7 @@ func (c *Context) Copy() *Context {
 	}
 	return &cp
 }
+
 // Set is used to store a new key/value pair exclusively for this context.
 // It also lazy initializes  c.Keys if it was not used previously.
 func (c *Context) Set(key string, value interface{}) {
@@ -190,4 +195,13 @@ func (c *Context) Value(key interface{}) interface{} {
 		return val
 	}
 	return nil
+}
+
+func NewContext() *Context {
+	now := time.Now()
+	gCtx := new(Context)
+	gCtx.Set("startTime", now)
+	gCtx.Set("startTimeUnix", now.Unix())
+	gCtx.Set("traceID", uuid.NewV4().String())
+	return gCtx
 }

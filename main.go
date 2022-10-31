@@ -4,7 +4,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"proxy/config"
 	"proxy/utils/context"
@@ -12,9 +11,7 @@ import (
 )
 
 func main() {
-	gCtx := new(context.Context)
-	gCtx.Set("startTime", time.Now())
-	gCtx.Set("startTimeUnix", time.Now().Unix())
+	gCtx := context.NewContext()
 	// wait for interrupt signal to gracefully shut down the server with
 	// a timeout of 10 seconds.
 	quit := make(chan os.Signal, 1)
@@ -34,4 +31,5 @@ func main() {
 	logger.Info(gCtx, map[string]interface{}{
 		"action": config.ActionRuntime,
 	}, "Server exiting")
+
 }

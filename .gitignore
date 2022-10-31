@@ -228,3 +228,6 @@ xcuserdata
 *.moved-aside
 *.xcuserstate
 
+## ignore china ip
+china_ip.txt
+
