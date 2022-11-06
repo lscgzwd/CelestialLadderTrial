@@ -43,6 +43,25 @@ func NewServer() common.Server {
 			UserName: "",
 			Password: "",
 		}
+	case config.ServerTypeHttp:
+		return &proxy.HttpServer{
+			Type:     config.Config.In.Type,
+			Port:     config.Config.In.Port,
+			UserName: "",
+			Password: "",
+		}
+	case config.ServerTypeTLS:
+		return &proxy.TlsServer{
+			Type:     config.Config.In.Type,
+			Port:     config.Config.In.Port,
+			UserName: "",
+		}
+	case config.ServerTypeWSS:
+		return &proxy.WSSServer{
+			Type:     config.Config.In.Type,
+			Port:     config.Config.In.Port,
+			UserName: "",
+		}
 	}
 	return nil
 }

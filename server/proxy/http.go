@@ -7,8 +7,10 @@ import (
 	"strconv"
 	"strings"
 
+	"proxy/config"
 	"proxy/server/common"
 	"proxy/utils/context"
+	"proxy/utils/logger"
 )
 
 type HttpServer struct {
@@ -19,7 +21,35 @@ type HttpServer struct {
 }
 
 func (s *HttpServer) Start(l net.Listener) {
-
+	// TODO http basic auth
+	err := http.Serve(l, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gCtx := context.NewContext()
+		gCtx.Set("request", request)
+		hj := writer.(http.Hijacker)
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			http.Error(writer, "cannot hijack", http.StatusInternalServerError)
+			// _, _ = writer.Write(common.DefaultHtml)
+			return
+		}
+		defer conn.Close()
+		wConn, target, err := s.Handshake(gCtx, conn)
+		if nil != err {
+			logger.Error(gCtx, map[string]interface{}{
+				"action":    config.ActionRequestBegin,
+				"errorCode": logger.ErrCodeHandshake,
+				"error":     err,
+			})
+		}
+	}))
+	gCtx := context.NewContext()
+	if nil != err {
+		logger.Error(gCtx, map[string]interface{}{
+			"action":    config.ActionRequestBegin,
+			"errorCode": logger.ErrCodeHandshake,
+			"error":     err,
+		})
+	}
 }
 func (s *HttpServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWriter, *common.TargetAddr, error) {
 	req, _ := ctx.Get("request")
