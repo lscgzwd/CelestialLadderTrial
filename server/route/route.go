@@ -21,6 +21,7 @@ import (
 	"proxy/utils/context"
 	"proxy/utils/gfwlist"
 	"proxy/utils/helper"
+	"proxy/utils/logger"
 )
 
 type ipRange struct {
@@ -98,10 +99,39 @@ func init() {
 		}
 	}
 }
+func IsCnIp(ctx *context.Context, ip string) bool {
+	segs := strings.Split(ip, ".")
+	first, _ := strconv.ParseUint(segs[0], 10, 64)
+	list, exist := cnIp[uint8(first)]
+	if !exist {
+		return false
+	}
+	min := helper.Ip2long(ip)
+	for _, v := range list {
+		if min >= v.Min && min <= v.Max {
+			return true
+		}
+	}
+	return false
+}
 func GetRemote(ctx *context.Context, target *common.TargetAddr) common.Remote {
 	if config.Config.Out.Type == config.RemoteTypeDirect {
 		return &proxy.DirectRemote{}
 	}
+	// check white and black list
+	if IsWhite(target.String()) {
+		return &proxy.DirectRemote{}
+	} else if IsBlack(target.String()) {
+		switch config.Config.Out.Type {
+		case config.RemoteTypeTLS:
+			return &proxy.TlsRemote{}
+		case config.RemoteTypeWSS:
+			return &proxy.WSSRemote{}
+		default:
+			return &proxy.DirectRemote{}
+		}
+	}
+	// domain
 	if target.IP == nil {
 		var u = &url.URL{
 			Scheme: "http",
@@ -111,6 +141,7 @@ func GetRemote(ctx *context.Context, target *common.TargetAddr) common.Remote {
 		if target.Port == 443 {
 			u.Scheme = "https"
 		}
+		// gfw list check
 		if gfw.IsBlockedByGFW(&http.Request{
 			Method: "GET",
 			URL:    u,
@@ -126,7 +157,7 @@ func GetRemote(ctx *context.Context, target *common.TargetAddr) common.Remote {
 			}
 		} else {
 			// doh 获取域名解析
-			ctx, cancel := context2.WithTimeout(context2.Background(), 10*time.Second)
+			ctxCancel, cancel := context2.WithTimeout(context2.Background(), 10*time.Second)
 			defer cancel()
 
 			c := doh.New()
@@ -135,13 +166,54 @@ func GetRemote(ctx *context.Context, target *common.TargetAddr) common.Remote {
 			if subnet == "" {
 				subnet = "110.242.68.0/24"
 			}
-			rsp, err := c.ECSQuery(ctx, "www.aliyun.com", doh.TypeA, doh.ECS(subnet))
+			rsp, err := c.ECSQuery(ctxCancel, "www.aliyun.com", doh.TypeA, doh.ECS(subnet))
 			if nil != err {
-
+				// doh err , return direct
+				logger.Error(ctx, map[string]interface{}{
+					"action":    config.ActionSocketOperate,
+					"errorCode": logger.ErrCodeHandshake,
+					"error":     err,
+				})
+				return &proxy.DirectRemote{}
 			}
+			var ip string
+			for _, v := range rsp.Answer {
+				if v.Type == doh.TypeA {
+					ip = v.Data
+				}
+			}
+			if ip != "" && len(ip) > 0 {
+				var ipObj = net.ParseIP(ip)
+				if nil == ipObj || ipObj.IsLoopback() || ipObj.IsPrivate() {
+					return &proxy.DirectRemote{}
+				}
+				if IsCnIp(ctx, ip) {
+					return &proxy.DirectRemote{}
+				}
+				switch config.Config.Out.Type {
+				case config.RemoteTypeTLS:
+					return &proxy.TlsRemote{}
+				case config.RemoteTypeWSS:
+					return &proxy.WSSRemote{}
+				default:
+					return &proxy.DirectRemote{}
+				}
+			}
+			return &proxy.DirectRemote{}
+		}
+	} else {
+		if IsCnIp(ctx, target.IP.String()) {
+			return &proxy.DirectRemote{}
+		}
+		switch config.Config.Out.Type {
+		case config.RemoteTypeTLS:
+			return &proxy.TlsRemote{}
+		case config.RemoteTypeWSS:
+			return &proxy.WSSRemote{}
+		default:
+			return &proxy.DirectRemote{}
 		}
 	}
-	return nil
 }
 
 func IsWhite(target string) bool {

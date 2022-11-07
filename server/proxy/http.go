@@ -9,6 +9,7 @@ import (
 
 	"proxy/config"
 	"proxy/server/common"
+	"proxy/server/route"
 	"proxy/utils/context"
 	"proxy/utils/logger"
 )
@@ -41,6 +42,19 @@ func (s *HttpServer) Start(l net.Listener) {
 				"error":     err,
 			})
 		}
+		remote := route.GetRemote(gCtx, target)
+		rConn, err := remote.Handshake(gCtx, target)
+		if nil != err {
+			logger.Error(gCtx, map[string]interface{}{
+				"action":    config.ActionRequestBegin,
+				"errorCode": logger.ErrCodeHandshake,
+				"error":     err,
+			})
+			wConn.Write(common.DefaultHtml)
+			return
+		}
+		go io.Copy(rConn, wConn)
+		io.Copy(wConn, rConn)
 	}))
 	gCtx := context.NewContext()
 	if nil != err {

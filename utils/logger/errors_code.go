@@ -7,6 +7,7 @@ const (
 	ErrCodeHandshake = 10001
 	ErrCodeListen    = 10002
 	ErrCodeAccept    = 10003
+	ErrCodeDoh       = 10004
 )
 
 var Messages = map[int]string{
@@ -14,6 +15,7 @@ var Messages = map[int]string{
 	ErrCodeHandshake: "握手错误",
 	ErrCodeListen:    "监听端口错误",
 	ErrCodeAccept:    "接受连接错误",
+	ErrCodeDoh:       "DOH域名解析错误",
 }
 
 func Code2Message(code int) string {
