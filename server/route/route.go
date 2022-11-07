@@ -146,6 +146,17 @@ func GetRemote(ctx *context.Context, target *common.TargetAddr) common.Remote {
 
 func IsWhite(target string) bool {
 	for _, v := range config.Config.WhiteList {
-		if strings.
+		if strings.Contains(target, v) {
+			return true
+		}
 	}
+	return false
+}
+func IsBlack(target string) bool {
+	for _, v := range config.Config.BlackList {
+		if strings.Contains(target, v) {
+			return true
+		}
+	}
+	return false
 }
