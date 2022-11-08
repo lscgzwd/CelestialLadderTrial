@@ -7,7 +7,7 @@ import (
 
 	"proxy/config"
 	"proxy/server/common"
-	"proxy/server/proxy"
+	"proxy/server/proxy/server"
 	"proxy/utils/context"
 	"proxy/utils/logger"
 )
@@ -24,40 +24,40 @@ func init() {
 		}, "can not listen on %v: %v", fmt.Sprintf("0.0.0.0:%d", config.Config.In.Port), err)
 		os.Exit(-1)
 	}
-	server := NewServer()
-	if nil == server {
+	s := NewServer()
+	if nil == s {
 		logger.Error(gCtx, map[string]interface{}{
 			"action": config.ActionRuntime,
 		}, "unknown server type")
 		os.Exit(-1)
 	}
-	server.Start(listener)
+	s.Start(listener)
 }
 
 func NewServer() common.Server {
 	switch config.Config.In.Type {
 	case config.ServerTypeSocket:
-		return &proxy.SocketServer{
+		return &server.SocketServer{
 			Type:     config.Config.In.Type,
 			Port:     config.Config.In.Port,
 			UserName: "",
 			Password: "",
 		}
 	case config.ServerTypeHttp:
-		return &proxy.HttpServer{
+		return &server.HttpServer{
 			Type:     config.Config.In.Type,
 			Port:     config.Config.In.Port,
 			UserName: "",
 			Password: "",
 		}
 	case config.ServerTypeTLS:
-		return &proxy.TlsServer{
+		return &server.TlsServer{
 			Type:     config.Config.In.Type,
 			Port:     config.Config.In.Port,
 			UserName: "",
 		}
 	case config.ServerTypeWSS:
-		return &proxy.WSSServer{
+		return &server.WSSServer{
 			Type:     config.Config.In.Type,
 			Port:     config.Config.In.Port,
 			UserName: "",

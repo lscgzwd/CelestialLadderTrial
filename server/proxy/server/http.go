@@ -1,4 +1,4 @@
-package proxy
+package server
 
 import (
 	"io"
@@ -41,6 +41,7 @@ func (s *HttpServer) Start(l net.Listener) {
 				"errorCode": logger.ErrCodeHandshake,
 				"error":     err,
 			})
+			return
 		}
 		remote := route.GetRemote(gCtx, target)
 		rConn, err := remote.Handshake(gCtx, target)

@@ -14,7 +14,7 @@ import (
 	"github.com/caddyserver/certmagic"
 )
 
-var Config *config
+var Config = new(config)
 var CstZone = time.FixedZone("CST", 8*3600) // 东八
 
 const (
@@ -44,7 +44,7 @@ const (
 	ProjectCode = 1001
 )
 
-var TLSConfig *tls.Config
+var TLSConfig = new(tls.Config)
 
 func init() {
 	var c string

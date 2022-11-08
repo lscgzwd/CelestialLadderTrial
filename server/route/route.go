@@ -17,7 +17,7 @@ import (
 	"proxy/config"
 	"proxy/server/common"
 	"proxy/server/doh"
-	"proxy/server/proxy"
+	"proxy/server/proxy/client"
 	"proxy/utils/context"
 	"proxy/utils/gfwlist"
 	"proxy/utils/helper"
@@ -43,7 +43,7 @@ func init() {
 			fmt.Printf("read ip file for China with error：%+v", err)
 			os.Exit(1)
 		}
-		config.Config.ChinaIpFile = path.Join(p, config.Config.ChinaIpFile)
+		config.Config.GFWListFile = path.Join(p, config.Config.GFWListFile)
 	}
 	gfw, err = gfwlist.NewGFWList("https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt", &http.Client{}, make([]string, 0), config.Config.GFWListFile, false)
 	if nil != err {
@@ -99,6 +99,8 @@ func init() {
 		}
 	}
 }
+
+// IsCnIp determine chinese ip
 func IsCnIp(ctx *context.Context, ip string) bool {
 	segs := strings.Split(ip, ".")
 	first, _ := strconv.ParseUint(segs[0], 10, 64)
@@ -116,19 +118,19 @@ func IsCnIp(ctx *context.Context, ip string) bool {
 }
 func GetRemote(ctx *context.Context, target *common.TargetAddr) common.Remote {
 	if config.Config.Out.Type == config.RemoteTypeDirect {
-		return &proxy.DirectRemote{}
+		return &client.DirectRemote{}
 	}
 	// check white and black list
 	if IsWhite(target.String()) {
-		return &proxy.DirectRemote{}
+		return &client.DirectRemote{}
 	} else if IsBlack(target.String()) {
 		switch config.Config.Out.Type {
 		case config.RemoteTypeTLS:
-			return &proxy.TlsRemote{}
+			return &client.TlsRemote{}
 		case config.RemoteTypeWSS:
-			return &proxy.WSSRemote{}
+			return &client.WSSRemote{}
 		default:
-			return &proxy.DirectRemote{}
+			return &client.DirectRemote{}
 		}
 	}
 	// domain
@@ -149,12 +151,14 @@ func GetRemote(ctx *context.Context, target *common.TargetAddr) common.Remote {
 		}) {
 			switch config.Config.Out.Type {
 			case config.RemoteTypeTLS:
-				return &proxy.TlsRemote{}
+				return &client.TlsRemote{}
 			case config.RemoteTypeWSS:
-				return &proxy.WSSRemote{}
+				return &client.WSSRemote{}
 			default:
-				return &proxy.DirectRemote{}
+				return &client.DirectRemote{}
 			}
+		} else if strings.HasSuffix(target.Name, ".cn") {
+			return &client.DirectRemote{}
 		} else {
 			// doh 获取域名解析
 			ctxCancel, cancel := context2.WithTimeout(context2.Background(), 10*time.Second)
@@ -166,7 +170,7 @@ func GetRemote(ctx *context.Context, target *common.TargetAddr) common.Remote {
 			if subnet == "" {
 				subnet = "110.242.68.0/24"
 			}
-			rsp, err := c.ECSQuery(ctxCancel, "www.aliyun.com", doh.TypeA, doh.ECS(subnet))
+			rsp, err := c.ECSQuery(ctxCancel, doh.Domain(target.Name), doh.TypeA, doh.ECS(subnet))
 			if nil != err {
 				// doh err , return direct
 				logger.Error(ctx, map[string]interface{}{
@@ -174,48 +178,54 @@ func GetRemote(ctx *context.Context, target *common.TargetAddr) common.Remote {
 					"errorCode": logger.ErrCodeHandshake,
 					"error":     err,
 				})
-				return &proxy.DirectRemote{}
+				return &client.DirectRemote{}
 			}
 			var ip string
 			for _, v := range rsp.Answer {
-				if v.Type == doh.TypeA {
+				// only use ipv4 type A record
+				// @link https://www.alidns.com/articles/6018321800a44d0e45e90d71
+				if v.Type == 1 {
 					ip = v.Data
 				}
 			}
 			if ip != "" && len(ip) > 0 {
 				var ipObj = net.ParseIP(ip)
+				// local network ip
 				if nil == ipObj || ipObj.IsLoopback() || ipObj.IsPrivate() {
-					return &proxy.DirectRemote{}
+					return &client.DirectRemote{}
 				}
+				// chinese ip
 				if IsCnIp(ctx, ip) {
-					return &proxy.DirectRemote{}
+					return &client.DirectRemote{}
 				}
 				switch config.Config.Out.Type {
 				case config.RemoteTypeTLS:
-					return &proxy.TlsRemote{}
+					return &client.TlsRemote{}
 				case config.RemoteTypeWSS:
-					return &proxy.WSSRemote{}
+					return &client.WSSRemote{}
 				default:
-					return &proxy.DirectRemote{}
+					return &client.DirectRemote{}
 				}
 			}
-			return &proxy.DirectRemote{}
+			return &client.DirectRemote{}
 		}
 	} else {
-		if IsCnIp(ctx, target.IP.String()) {
-			return &proxy.DirectRemote{}
+		// local network or chinese ip
+		if IsCnIp(ctx, target.IP.String()) || target.IP.IsLoopback() || target.IP.IsPrivate() {
+			return &client.DirectRemote{}
 		}
 		switch config.Config.Out.Type {
 		case config.RemoteTypeTLS:
-			return &proxy.TlsRemote{}
+			return &client.TlsRemote{}
 		case config.RemoteTypeWSS:
-			return &proxy.WSSRemote{}
+			return &client.WSSRemote{}
 		default:
-			return &proxy.DirectRemote{}
+			return &client.DirectRemote{}
 		}
 	}
 }
 
+// IsWhite check white list
 func IsWhite(target string) bool {
 	for _, v := range config.Config.WhiteList {
 		if strings.Contains(target, v) {
@@ -224,6 +234,8 @@ func IsWhite(target string) bool {
 	}
 	return false
 }
+
+// IsBlack check black list
 func IsBlack(target string) bool {
 	for _, v := range config.Config.BlackList {
 		if strings.Contains(target, v) {

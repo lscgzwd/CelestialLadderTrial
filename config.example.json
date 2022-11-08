@@ -1,0 +1,24 @@
+{
+  "debug": true,
+  "user": "8023f60f80bec18c1af3a5500227fa72",
+  "ecs_subnet": "123.113.14.132/24",
+  "in": {
+    "type": 1,
+    "port": 6789,
+    "server_name": "my-static.shuncheng.lu",
+    "email": "i@shuncheng.lu"
+  },
+  "out": {
+    "type": 3,
+    "remote_addr": ""
+  },
+  "white_list": [],
+  "black_list": [],
+  "china_ip_file": "china_ip.txt",
+  "gfw_list_file": "gfwlist.txt",
+  "log": {
+    "path": "./",
+    "level": "info",
+    "file_name": "app.log"
+  }
+}

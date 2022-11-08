@@ -230,4 +230,8 @@ xcuserdata
 
 ## ignore china ip
 china_ip.txt
+## ignore gfwlist
+gfwlist.txt
+## ignore config
+config.json
 

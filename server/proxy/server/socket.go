@@ -1,4 +1,4 @@
-package proxy
+package server
 
 import (
 	"fmt"
@@ -9,6 +9,7 @@ import (
 	"github.com/pkg/errors"
 	"proxy/config"
 	"proxy/server/common"
+	"proxy/server/route"
 	"proxy/utils/context"
 	"proxy/utils/logger"
 )
@@ -46,26 +47,43 @@ type SocketServer struct {
 }
 
 func (s *SocketServer) Start(l net.Listener) {
-	conn, err := l.Accept()
-	go func() {
-		defer conn.Close()
-		gCtx := context.NewContext()
-		if nil != err {
-			logger.Error(gCtx, map[string]interface{}{
-				"action":    config.ActionRequestBegin,
-				"errorCode": logger.ErrCodeHandshake,
-				"error":     err,
-			})
-		}
-		wConn, target, err := s.Handshake(gCtx, conn)
-		if nil != err {
-			logger.Error(gCtx, map[string]interface{}{
-				"action":    config.ActionRequestBegin,
-				"errorCode": logger.ErrCodeHandshake,
-				"error":     err,
-			})
-		}
-	}()
+	for {
+		conn, err := l.Accept()
+		go func() {
+			defer conn.Close()
+			gCtx := context.NewContext()
+			if nil != err {
+				logger.Error(gCtx, map[string]interface{}{
+					"action":    config.ActionRequestBegin,
+					"errorCode": logger.ErrCodeHandshake,
+					"error":     err,
+				})
+				return
+			}
+			wConn, target, err := s.Handshake(gCtx, conn)
+			if nil != err {
+				logger.Error(gCtx, map[string]interface{}{
+					"action":    config.ActionRequestBegin,
+					"errorCode": logger.ErrCodeHandshake,
+					"error":     err,
+				})
+				return
+			}
+			remote := route.GetRemote(gCtx, target)
+			rConn, err := remote.Handshake(gCtx, target)
+			if nil != err {
+				logger.Error(gCtx, map[string]interface{}{
+					"action":    config.ActionRequestBegin,
+					"errorCode": logger.ErrCodeHandshake,
+					"error":     err,
+				})
+				wConn.Write(common.DefaultHtml)
+				return
+			}
+			go io.Copy(rConn, wConn)
+			io.Copy(wConn, rConn)
+		}()
+	}
 }
 func (s *SocketServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWriter, *common.TargetAddr, error) {
 	// 在函数退出前，执行defer
@@ -91,7 +109,7 @@ func (s *SocketServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWr
 	buf := make([]byte, 512)
 
 	// Read hello message
-	n, err := conn.Read(buf)
+	n, err := conn.Read(buf[:])
 	if err != nil || n == 0 {
 		return nil, nil, fmt.Errorf("failed to read hello: %w", err)
 	}
@@ -108,7 +126,7 @@ func (s *SocketServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWr
 	}
 
 	// Read command message
-	n, err = conn.Read(buf)
+	n, err = conn.Read(buf[:])
 	if err != nil || n < 7 { // Shortest length is 7
 		return nil, nil, fmt.Errorf("failed to read command: %w", err)
 	}

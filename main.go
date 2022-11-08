@@ -6,6 +6,7 @@ import (
 	"syscall"
 
 	"proxy/config"
+	_ "proxy/server"
 	"proxy/utils/context"
 	"proxy/utils/logger"
 )
