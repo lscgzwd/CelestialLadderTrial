@@ -74,6 +74,9 @@ func (s *TlsServer) Start(l net.Listener) {
 			})
 			return
 		}
+		buf.Write(common.DefaultHtml)
+		buf.Flush()
+		return
 		remote := route.GetRemote(gCtx, target)
 		rConn, err := remote.Handshake(gCtx, target)
 		if nil != err {
