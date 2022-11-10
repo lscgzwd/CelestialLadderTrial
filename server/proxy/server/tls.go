@@ -26,41 +26,43 @@ type TlsServer struct {
 }
 
 func (s *TlsServer) Start(l net.Listener) {
-	conn, err := l.Accept()
-	go func() {
-		defer conn.Close()
-		gCtx := context.NewContext()
-		if nil != err {
-			logger.Error(gCtx, map[string]interface{}{
-				"action":    config.ActionRequestBegin,
-				"errorCode": logger.ErrCodeHandshake,
-				"error":     err,
-			})
-			return
-		}
-		wConn, target, err := s.Handshake(gCtx, conn)
-		if nil != err {
-			logger.Error(gCtx, map[string]interface{}{
-				"action":    config.ActionRequestBegin,
-				"errorCode": logger.ErrCodeHandshake,
-				"error":     err,
-			})
-			return
-		}
-		remote := route.GetRemote(gCtx, target)
-		rConn, err := remote.Handshake(gCtx, target)
-		if nil != err {
-			logger.Error(gCtx, map[string]interface{}{
-				"action":    config.ActionRequestBegin,
-				"errorCode": logger.ErrCodeHandshake,
-				"error":     err,
-			})
-			wConn.Write(common.DefaultHtml)
-			return
-		}
-		go io.Copy(rConn, wConn)
-		io.Copy(wConn, rConn)
-	}()
+	for {
+		conn, err := l.Accept()
+		go func() {
+			defer conn.Close()
+			gCtx := context.NewContext()
+			if nil != err {
+				logger.Error(gCtx, map[string]interface{}{
+					"action":    config.ActionRequestBegin,
+					"errorCode": logger.ErrCodeHandshake,
+					"error":     err,
+				})
+				return
+			}
+			wConn, target, err := s.Handshake(gCtx, conn)
+			if nil != err {
+				logger.Error(gCtx, map[string]interface{}{
+					"action":    config.ActionRequestBegin,
+					"errorCode": logger.ErrCodeHandshake,
+					"error":     err,
+				})
+				return
+			}
+			remote := route.GetRemote(gCtx, target)
+			rConn, err := remote.Handshake(gCtx, target)
+			if nil != err {
+				logger.Error(gCtx, map[string]interface{}{
+					"action":    config.ActionRequestBegin,
+					"errorCode": logger.ErrCodeHandshake,
+					"error":     err,
+				})
+				wConn.Write(common.DefaultHtml)
+				return
+			}
+			go io.Copy(rConn, wConn)
+			io.Copy(wConn, rConn)
+		}()
+	}
 }
 func (s *TlsServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWriter, *common.TargetAddr, error) {
 	// 在函数退出前，执行defer
