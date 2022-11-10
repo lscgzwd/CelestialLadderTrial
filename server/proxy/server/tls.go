@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bufio"
 	"crypto/tls"
 	"encoding/binary"
 	"io"
@@ -63,13 +64,9 @@ func (s *TlsServer) Start(l net.Listener) {
 			return
 		}
 		defer conn.Close()
-		buf.Write(common.DefaultHtml)
-		buf.Flush()
-		return
+		gCtx.Set("rw", buf)
 		wConn, target, err := s.Handshake(gCtx, conn)
 		if nil != err {
-			buf.Write(common.DefaultHtml)
-			buf.Flush()
 			logger.Error(gCtx, map[string]interface{}{
 				"action":    config.ActionRequestBegin,
 				"errorCode": logger.ErrCodeHandshake,
@@ -136,23 +133,33 @@ func (s *TlsServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWrite
 			})
 		}
 	}()
+	rw, _ := ctx.Get("rw")
+	buf := rw.(*bufio.ReadWriter)
 	ec, err := common.NewChacha20Stream([]byte(config.Config.User), conn)
 	if nil != err {
+		buf.Write(common.DefaultHtml)
+		buf.Flush()
 		return nil, nil, err
 	}
 	tBuf := make([]byte, 8)
 	_, err = ec.Read(tBuf)
 	if nil != err {
+		buf.Write(common.DefaultHtml)
+		buf.Flush()
 		return nil, nil, err
 	}
 	ts := binary.BigEndian.Uint64(tBuf)
 	if uint64(time.Now().Unix())-ts > 10 {
+		buf.Write(common.DefaultHtml)
+		buf.Flush()
 		return nil, nil, errors.New("The time between server and client must same.")
 	}
 
 	dlBuf := make([]byte, 2)
 	_, err = ec.Read(dlBuf)
 	if nil != err {
+		buf.Write(common.DefaultHtml)
+		buf.Flush()
 		return nil, nil, err
 	}
 	dl := binary.BigEndian.Uint16(dlBuf)
@@ -160,6 +167,8 @@ func (s *TlsServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWrite
 	addrBuf := make([]byte, dl)
 	_, err = ec.Read(addrBuf)
 	if nil != err {
+		buf.Write(common.DefaultHtml)
+		buf.Flush()
 		return nil, nil, err
 	}
 
@@ -171,10 +180,14 @@ func (s *TlsServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWrite
 		var portStr string
 		host, portStr, err = net.SplitHostPort(addr)
 		if nil != err {
+			buf.Write(common.DefaultHtml)
+			buf.Flush()
 			return nil, nil, err
 		}
 		port64, err := strconv.ParseInt(portStr, 10, 64)
 		if nil != err {
+			buf.Write(common.DefaultHtml)
+			buf.Flush()
 			return nil, nil, err
 		}
 		port = int(port64)
