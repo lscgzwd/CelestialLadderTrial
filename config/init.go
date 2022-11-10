@@ -95,6 +95,6 @@ func init() {
 			os.Exit(1)
 		}
 		TLSConfig.NextProtos = append(TLSConfig.NextProtos, "http/1.1")
-		TLSConfig.ServerName = Config.In.ServerName
+		//TLSConfig.ServerName = Config.In.ServerName
 	}
 }
