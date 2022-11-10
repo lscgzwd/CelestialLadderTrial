@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"time"
 
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/chacha20"
@@ -62,12 +63,14 @@ func (s *Chacha20Stream) Read(p []byte) (int, error) {
 		nonce := make([]byte, chacha20.NonceSizeX)
 		if n, err := io.ReadAtLeast(s.conn, nonce, len(nonce)); err != nil || n != len(nonce) {
 			s.conn.Write(DefaultHtml)
+			s.conn.SetWriteDeadline(time.Now().Add(time.Millisecond * 1000))
 			s.conn.Close()
 			return n, errors.New("can't read nonce from stream: " + err.Error())
 		}
 		decoder, err := chacha20.NewUnauthenticatedCipher(s.key, nonce)
 		if err != nil {
 			s.conn.Write(DefaultHtml)
+			s.conn.SetWriteDeadline(time.Now().Add(time.Millisecond * 1000))
 			s.conn.Close()
 			return 0, errors.New("generate decoder failed: " + err.Error())
 		}
