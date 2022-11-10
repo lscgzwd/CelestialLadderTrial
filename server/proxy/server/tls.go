@@ -52,7 +52,7 @@ func (s *TlsServer) Start(l net.Listener) {
 			writer.Write([]byte(common.Body))
 			return
 		}
-		conn, _, err := h.Hijack()
+		conn, buf, err := h.Hijack()
 		if err != nil {
 			logger.Error(gCtx, map[string]interface{}{
 				"action":    config.ActionRequestBegin,
@@ -65,7 +65,8 @@ func (s *TlsServer) Start(l net.Listener) {
 		defer conn.Close()
 		wConn, target, err := s.Handshake(gCtx, conn)
 		if nil != err {
-			conn.Write(common.DefaultHtml)
+			buf.Write(common.DefaultHtml)
+			buf.Flush()
 			logger.Error(gCtx, map[string]interface{}{
 				"action":    config.ActionRequestBegin,
 				"errorCode": logger.ErrCodeHandshake,
@@ -81,11 +82,33 @@ func (s *TlsServer) Start(l net.Listener) {
 				"errorCode": logger.ErrCodeHandshake,
 				"error":     err,
 			})
-			conn.Write(common.DefaultHtml)
+			buf.Write(common.DefaultHtml)
+			buf.Flush()
 			return
 		}
-		go io.Copy(rConn, wConn)
-		io.Copy(wConn, rConn)
+
+		go func() {
+			_, err = io.Copy(rConn, wConn)
+			if nil != err {
+				logger.Error(gCtx, map[string]interface{}{
+					"action":    config.ActionSocketOperate,
+					"errorCode": logger.ErrCodeTransfer,
+					"error":     err,
+				})
+				buf.Write(common.DefaultHtml)
+				buf.Flush()
+			}
+		}()
+		_, err = io.Copy(wConn, rConn)
+		if nil != err {
+			logger.Error(gCtx, map[string]interface{}{
+				"action":    config.ActionSocketOperate,
+				"errorCode": logger.ErrCodeTransfer,
+				"error":     err,
+			})
+			buf.Write(common.DefaultHtml)
+			buf.Flush()
+		}
 	}))
 	gCtx := context.NewContext()
 	if nil != err {

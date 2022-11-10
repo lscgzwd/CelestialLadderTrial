@@ -5,7 +5,6 @@ import (
 	"io"
 	"net"
 	"strconv"
-	"time"
 
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/chacha20"
@@ -62,18 +61,10 @@ func (s *Chacha20Stream) Read(p []byte) (int, error) {
 	if s.decoder == nil {
 		nonce := make([]byte, chacha20.NonceSizeX)
 		if n, err := io.ReadAtLeast(s.conn, nonce, len(nonce)); err != nil || n != len(nonce) {
-			s.conn.Write(DefaultHtml)
-			s.conn.SetWriteDeadline(time.Now().Add(time.Millisecond * 1000))
-			s.conn.SetReadDeadline(time.Now().Add(time.Millisecond * 1000))
-			s.conn.Close()
 			return n, errors.New("can't read nonce from stream: " + err.Error())
 		}
 		decoder, err := chacha20.NewUnauthenticatedCipher(s.key, nonce)
 		if err != nil {
-			s.conn.Write(DefaultHtml)
-			s.conn.SetWriteDeadline(time.Now().Add(time.Millisecond * 1000))
-			s.conn.SetReadDeadline(time.Now().Add(time.Millisecond * 1000))
-			s.conn.Close()
 			return 0, errors.New("generate decoder failed: " + err.Error())
 		}
 		s.decoder = decoder
@@ -185,9 +176,4 @@ with(m=Math)C=cos,S=sin,P=pow,R=random;c.width=c.height=f=500;h=-250;function p(
   </body>
 </html>
 `
-var DefaultHtml = []byte(`
-HTTP/1.1 200 OK
-Server: nginx
-Content-Type: text/html;charset=utf-8
-Connection: Close
-Content-Length: ` + strconv.FormatInt(int64(len([]byte(Body))), 10) + "\r\n\r\n" + Body)
+var DefaultHtml = []byte("HTTP/1.1 200 OK\r\nServer: nginx\r\nContent-Type: text/html;charset=utf-8\r\nConnection: Close\r\nContent-Length: " + strconv.FormatInt(int64(len([]byte(Body))), 10) + "\r\n\r\n" + Body)

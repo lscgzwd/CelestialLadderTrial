@@ -72,8 +72,26 @@ func (s *WSSServer) Start(l net.Listener) {
 			_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"code":0, "data":[], "message":"success"}`))
 			return
 		}
-		go io.Copy(rConn, wConn)
-		io.Copy(wConn, rConn)
+		go func() {
+			_, err = io.Copy(rConn, wConn)
+			if nil != err {
+				logger.Error(gCtx, map[string]interface{}{
+					"action":    config.ActionSocketOperate,
+					"errorCode": logger.ErrCodeTransfer,
+					"error":     err,
+				})
+				_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"code":0, "data":[], "message":"success"}`))
+			}
+		}()
+		_, err = io.Copy(wConn, rConn)
+		if nil != err {
+			logger.Error(gCtx, map[string]interface{}{
+				"action":    config.ActionSocketOperate,
+				"errorCode": logger.ErrCodeTransfer,
+				"error":     err,
+			})
+			_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"code":0, "data":[], "message":"success"}`))
+		}
 	}))
 	gCtx := context.NewContext()
 	if nil != err {
