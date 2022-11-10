@@ -87,7 +87,7 @@ func init() {
 		// provide an email address
 		certmagic.DefaultACME.Email = Config.In.Email
 		// use the staging endpoint while we're developing
-		certmagic.DefaultACME.CA = certmagic.LetsEncryptStagingCA
+		certmagic.DefaultACME.CA = certmagic.LetsEncryptProductionCA
 
 		TLSConfig, err = certmagic.TLS([]string{Config.In.ServerName})
 		if nil != err {

@@ -6,7 +6,7 @@ type config struct {
 	ECSSubnet string `json:"ecs_subnet"`
 	In        struct {
 		Type       int8   `json:"type"`        // 1: local http 2: local socket5 3: https 4: web socket secure
-		Port       int    `json:"port"`        // 监听的端口 小于1024的端口需要root权限启动 或者使用setcap 分配权限
+		Port       int    `json:"port"`        // https 和wss 不能指定，默认443
 		ServerName string `json:"server_name"` // 本机是https服务器时，使用的域名
 		Email      string `json:"email"`       // used to issue cert
 	} `json:"in"`
