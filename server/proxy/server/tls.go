@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"io"
 	"net"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -26,42 +27,73 @@ type TlsServer struct {
 }
 
 func (s *TlsServer) Start(l net.Listener) {
-	for {
-		conn, err := l.Accept()
-		go func() {
-			defer conn.Close()
-			gCtx := context.NewContext()
-			if nil != err {
+	// TODO http basic auth
+	err := http.Serve(tls.NewListener(l, config.TLSConfig), http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gCtx := context.NewContext()
+		gCtx.Set("request", request)
+		defer func() {
+			err := recover() // 内置函数，可以捕捉到函数异常
+			if err != nil {
+				// 这里是打印错误，还可以进行报警处理，例如微信，邮箱通知
 				logger.Error(gCtx, map[string]interface{}{
 					"action":    config.ActionRequestBegin,
 					"errorCode": logger.ErrCodeHandshake,
 					"error":     err,
 				})
-				return
 			}
-			wConn, target, err := s.Handshake(gCtx, conn)
-			if nil != err {
-				logger.Error(gCtx, map[string]interface{}{
-					"action":    config.ActionRequestBegin,
-					"errorCode": logger.ErrCodeHandshake,
-					"error":     err,
-				})
-				return
-			}
-			remote := route.GetRemote(gCtx, target)
-			rConn, err := remote.Handshake(gCtx, target)
-			if nil != err {
-				logger.Error(gCtx, map[string]interface{}{
-					"action":    config.ActionRequestBegin,
-					"errorCode": logger.ErrCodeHandshake,
-					"error":     err,
-				})
-				wConn.Write(common.DefaultHtml)
-				return
-			}
-			go io.Copy(rConn, wConn)
-			io.Copy(wConn, rConn)
 		}()
+		h, ok := writer.(http.Hijacker)
+		if !ok {
+			logger.Error(gCtx, map[string]interface{}{
+				"action":    config.ActionRequestBegin,
+				"errorCode": logger.ErrCodeHandshake,
+				"error":     errors.New("http hijack not support"),
+			})
+			writer.Write([]byte(common.Body))
+			return
+		}
+		conn, _, err := h.Hijack()
+		if err != nil {
+			logger.Error(gCtx, map[string]interface{}{
+				"action":    config.ActionRequestBegin,
+				"errorCode": logger.ErrCodeHandshake,
+				"error":     err,
+			})
+			writer.Write([]byte(common.Body))
+			return
+		}
+		defer conn.Close()
+		wConn, target, err := s.Handshake(gCtx, conn)
+		if nil != err {
+			writer.Write([]byte(common.Body))
+			logger.Error(gCtx, map[string]interface{}{
+				"action":    config.ActionRequestBegin,
+				"errorCode": logger.ErrCodeHandshake,
+				"error":     err,
+			})
+			return
+		}
+		remote := route.GetRemote(gCtx, target)
+		rConn, err := remote.Handshake(gCtx, target)
+		if nil != err {
+			logger.Error(gCtx, map[string]interface{}{
+				"action":    config.ActionRequestBegin,
+				"errorCode": logger.ErrCodeHandshake,
+				"error":     err,
+			})
+			writer.Write([]byte(common.Body))
+			return
+		}
+		go io.Copy(rConn, wConn)
+		io.Copy(wConn, rConn)
+	}))
+	gCtx := context.NewContext()
+	if nil != err {
+		logger.Error(gCtx, map[string]interface{}{
+			"action":    config.ActionRequestBegin,
+			"errorCode": logger.ErrCodeHandshake,
+			"error":     err,
+		})
 	}
 }
 func (s *TlsServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWriter, *common.TargetAddr, error) {
@@ -78,38 +110,23 @@ func (s *TlsServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWrite
 			})
 		}
 	}()
-	tlsConn := tls.Server(conn, config.TLSConfig)
-	// Set handshake timeout 4 seconds
-	if err := tlsConn.SetReadDeadline(time.Now().Add(time.Second * 4)); err != nil {
-		return nil, nil, err
-	}
-	defer tlsConn.SetReadDeadline(time.Time{})
-
-	err := tlsConn.Handshake()
+	ec, err := common.NewChacha20Stream([]byte(config.Config.User), conn)
 	if nil != err {
-		return nil, nil, err
-	}
-	ec, err := common.NewChacha20Stream([]byte(config.Config.User), tlsConn)
-	if nil != err {
-		_, _ = tlsConn.Write(common.DefaultHtml)
 		return nil, nil, err
 	}
 	tBuf := make([]byte, 8)
 	_, err = ec.Read(tBuf)
 	if nil != err {
-		_, _ = tlsConn.Write(common.DefaultHtml)
 		return nil, nil, err
 	}
 	ts := binary.BigEndian.Uint64(tBuf)
 	if uint64(time.Now().Unix())-ts > 10 {
-		_, _ = tlsConn.Write(common.DefaultHtml)
 		return nil, nil, errors.New("The time between server and client must same.")
 	}
 
 	dlBuf := make([]byte, 2)
 	_, err = ec.Read(dlBuf)
 	if nil != err {
-		_, _ = tlsConn.Write(common.DefaultHtml)
 		return nil, nil, err
 	}
 	dl := binary.BigEndian.Uint16(dlBuf)
@@ -117,7 +134,6 @@ func (s *TlsServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWrite
 	addrBuf := make([]byte, dl)
 	_, err = ec.Read(addrBuf)
 	if nil != err {
-		_, _ = tlsConn.Write(common.DefaultHtml)
 		return nil, nil, err
 	}
 
@@ -129,12 +145,10 @@ func (s *TlsServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWrite
 		var portStr string
 		host, portStr, err = net.SplitHostPort(addr)
 		if nil != err {
-			_, _ = tlsConn.Write(common.DefaultHtml)
 			return nil, nil, err
 		}
 		port64, err := strconv.ParseInt(portStr, 10, 64)
 		if nil != err {
-			_, _ = tlsConn.Write(common.DefaultHtml)
 			return nil, nil, err
 		}
 		port = int(port64)
@@ -148,5 +162,5 @@ func (s *TlsServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWrite
 	} else {
 		target.IP = ip
 	}
-	return conn, target, nil
+	return ec, target, nil
 }

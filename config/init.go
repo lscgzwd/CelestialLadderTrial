@@ -94,6 +94,7 @@ func init() {
 			fmt.Printf("can not get cert for domain：%+v", err)
 			os.Exit(1)
 		}
-		TLSConfig.NextProtos = []string{"acme-tls/1", "http/1.1", "https/1.1"}
+		TLSConfig.NextProtos = append(TLSConfig.NextProtos, "http/1.1")
+		TLSConfig.ServerName = Config.In.ServerName
 	}
 }

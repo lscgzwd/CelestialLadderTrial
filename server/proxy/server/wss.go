@@ -34,6 +34,17 @@ func (s *WSSServer) Start(l net.Listener) {
 	err := http.Serve(tls.NewListener(l, config.TLSConfig), http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		gCtx := context.NewContext()
 		gCtx.Set("request", request)
+		defer func() {
+			err := recover() // 内置函数，可以捕捉到函数异常
+			if err != nil {
+				// 这里是打印错误，还可以进行报警处理，例如微信，邮箱通知
+				logger.Error(gCtx, map[string]interface{}{
+					"action":    config.ActionRequestBegin,
+					"errorCode": logger.ErrCodeHandshake,
+					"error":     err,
+				})
+			}
+		}()
 		conn, err := upgrader.Upgrade(writer, request, nil)
 		if err != nil {
 			_, _ = writer.Write([]byte(common.Body))
@@ -58,7 +69,7 @@ func (s *WSSServer) Start(l net.Listener) {
 				"errorCode": logger.ErrCodeHandshake,
 				"error":     err,
 			})
-			wConn.Write(common.DefaultHtml)
+			_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"code":0, "data":[], "message":"success"}`))
 			return
 		}
 		go io.Copy(rConn, wConn)
