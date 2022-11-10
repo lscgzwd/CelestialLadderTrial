@@ -139,11 +139,21 @@ func (s *TlsServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWrite
 	if nil != err {
 		buf.Write(common.DefaultHtml)
 		buf.Flush()
+		logger.Info(ctx, map[string]interface{}{
+			"action":    config.ActionRequestBegin,
+			"errorCode": logger.ErrCodeHandshake,
+			"error":     err,
+		}, "NewChacha20Stream")
 		return nil, nil, err
 	}
 	tBuf := make([]byte, 8)
 	_, err = ec.Read(tBuf)
 	if nil != err {
+		logger.Error(ctx, map[string]interface{}{
+			"action":    config.ActionRequestBegin,
+			"errorCode": logger.ErrCodeHandshake,
+			"error":     err,
+		}, "read time buf")
 		buf.Write(common.DefaultHtml)
 		buf.Flush()
 		return nil, nil, err

@@ -40,20 +40,6 @@ func NewChacha20Stream(key []byte, conn net.Conn) (*Chacha20Stream, error) {
 		conn: conn,
 	}
 
-	var err error
-	nonce := make([]byte, chacha20.NonceSizeX)
-	if _, err := rand.Read(nonce); err != nil {
-		return nil, err
-	}
-
-	s.encoder, err = chacha20.NewUnauthenticatedCipher(s.key, nonce)
-	if err != nil {
-		return nil, err
-	}
-
-	if n, err := s.conn.Write(nonce); err != nil || n != len(nonce) {
-		return nil, errors.New("write nonce failed: " + err.Error())
-	}
 	return s, nil
 }
 
@@ -83,6 +69,22 @@ func (s *Chacha20Stream) Read(p []byte) (int, error) {
 }
 
 func (s *Chacha20Stream) Write(p []byte) (int, error) {
+	if s.encoder == nil {
+		var err error
+		nonce := make([]byte, chacha20.NonceSizeX)
+		if _, err := rand.Read(nonce); err != nil {
+			return 0, err
+		}
+
+		s.encoder, err = chacha20.NewUnauthenticatedCipher(s.key, nonce)
+		if err != nil {
+			return 0, err
+		}
+
+		if n, err := s.conn.Write(nonce); err != nil || n != len(nonce) {
+			return 0, errors.New("write nonce failed: " + err.Error())
+		}
+	}
 	dst := make([]byte, len(p))
 	s.encoder.XORKeyStream(dst, p)
 	return s.conn.Write(dst)
