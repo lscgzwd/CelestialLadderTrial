@@ -63,6 +63,9 @@ func (s *TlsServer) Start(l net.Listener) {
 			return
 		}
 		defer conn.Close()
+		buf.Write(common.DefaultHtml)
+		buf.Flush()
+		return
 		wConn, target, err := s.Handshake(gCtx, conn)
 		if nil != err {
 			buf.Write(common.DefaultHtml)
@@ -74,9 +77,6 @@ func (s *TlsServer) Start(l net.Listener) {
 			})
 			return
 		}
-		buf.Write(common.DefaultHtml)
-		buf.Flush()
-		return
 		remote := route.GetRemote(gCtx, target)
 		rConn, err := remote.Handshake(gCtx, target)
 		if nil != err {
