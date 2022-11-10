@@ -65,7 +65,7 @@ func (s *TlsServer) Start(l net.Listener) {
 		defer conn.Close()
 		wConn, target, err := s.Handshake(gCtx, conn)
 		if nil != err {
-			writer.Write([]byte(common.Body))
+			conn.Write(common.DefaultHtml)
 			logger.Error(gCtx, map[string]interface{}{
 				"action":    config.ActionRequestBegin,
 				"errorCode": logger.ErrCodeHandshake,
@@ -81,7 +81,7 @@ func (s *TlsServer) Start(l net.Listener) {
 				"errorCode": logger.ErrCodeHandshake,
 				"error":     err,
 			})
-			writer.Write([]byte(common.Body))
+			conn.Write(common.DefaultHtml)
 			return
 		}
 		go io.Copy(rConn, wConn)
