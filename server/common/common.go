@@ -64,6 +64,7 @@ func (s *Chacha20Stream) Read(p []byte) (int, error) {
 		if n, err := io.ReadAtLeast(s.conn, nonce, len(nonce)); err != nil || n != len(nonce) {
 			s.conn.Write(DefaultHtml)
 			s.conn.SetWriteDeadline(time.Now().Add(time.Millisecond * 1000))
+			s.conn.SetReadDeadline(time.Now().Add(time.Millisecond * 1000))
 			s.conn.Close()
 			return n, errors.New("can't read nonce from stream: " + err.Error())
 		}
@@ -71,6 +72,7 @@ func (s *Chacha20Stream) Read(p []byte) (int, error) {
 		if err != nil {
 			s.conn.Write(DefaultHtml)
 			s.conn.SetWriteDeadline(time.Now().Add(time.Millisecond * 1000))
+			s.conn.SetReadDeadline(time.Now().Add(time.Millisecond * 1000))
 			s.conn.Close()
 			return 0, errors.New("generate decoder failed: " + err.Error())
 		}
