@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"time"
 
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/chacha20"
@@ -46,9 +47,11 @@ func NewChacha20Stream(key []byte, conn net.Conn) (*Chacha20Stream, error) {
 func (s *Chacha20Stream) Read(p []byte) (int, error) {
 	if s.decoder == nil {
 		nonce := make([]byte, chacha20.NonceSizeX)
+		s.conn.SetReadDeadline(time.Now().Add(time.Second * 4))
 		if n, err := io.ReadAtLeast(s.conn, nonce, len(nonce)); err != nil || n != len(nonce) {
 			return n, errors.New("can't read nonce from stream: " + err.Error())
 		}
+		s.conn.SetReadDeadline(time.Time{})
 		decoder, err := chacha20.NewUnauthenticatedCipher(s.key, nonce)
 		if err != nil {
 			return 0, errors.New("generate decoder failed: " + err.Error())
@@ -80,10 +83,11 @@ func (s *Chacha20Stream) Write(p []byte) (int, error) {
 		if err != nil {
 			return 0, err
 		}
-
+		s.conn.SetWriteDeadline(time.Now().Add(time.Second * 4))
 		if n, err := s.conn.Write(nonce); err != nil || n != len(nonce) {
 			return 0, errors.New("write nonce failed: " + err.Error())
 		}
+		s.conn.SetWriteDeadline(time.Time{})
 	}
 	dst := make([]byte, len(p))
 	s.encoder.XORKeyStream(dst, p)
