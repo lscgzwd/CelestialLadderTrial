@@ -81,7 +81,7 @@ func (c *AliyunProvider) ECSQuery(ctx context.Context, d Domain, t Type, s ECS) 
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("%s", string(buf))
+	// fmt.Printf("%s", string(buf))
 	rr := &Response{
 		Provider: c.String(),
 	}

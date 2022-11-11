@@ -46,6 +46,10 @@ func (r *TlsRemote) Handshake(ctx *context.Context, target *common.TargetAddr) (
 	if nil != err {
 		return nil, err
 	}
+	_, err = cc.Write([]byte("GET / HTTP/1.1\r\nHost: " + config.Config.Out.RemoteAddr + "\r\nConnection: keep-alive"))
+	if nil != err {
+		return nil, err
+	}
 	ec, err := common.NewChacha20Stream([]byte(config.Config.User), cc)
 	if nil != err {
 		return nil, err

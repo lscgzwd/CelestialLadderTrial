@@ -5,7 +5,7 @@ type config struct {
 	User      string `json:"user"` // password, used to encode the connection, must 32 byte length
 	ECSSubnet string `json:"ecs_subnet"`
 	In        struct {
-		Type       int8   `json:"type"`        // 1: local http 2: local socket5 3: https 4: web socket secure
+		Type       int8   `json:"type"`        // 1: local socks5 2: local http 3: https 4: web socket secure
 		Port       int    `json:"port"`        // https 和wss 不能指定，默认443
 		ServerName string `json:"server_name"` // 本机是https服务器时，使用的域名
 		Email      string `json:"email"`       // used to issue cert
