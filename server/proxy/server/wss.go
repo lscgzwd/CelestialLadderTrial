@@ -116,12 +116,10 @@ func (s *WSSServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWrite
 			})
 		}
 	}()
-	ec, err := common.NewChacha20Stream([]byte(config.Config.User), conn)
-	if nil != err {
-		return nil, nil, err
-	}
+	ec := common.NewChacha20Stream([]byte(config.Config.User), conn)
+
 	tBuf := make([]byte, 8)
-	_, err = ec.Read(tBuf)
+	_, err := ec.Read(tBuf)
 	if nil != err {
 		return nil, nil, err
 	}

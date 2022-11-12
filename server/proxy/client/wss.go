@@ -44,10 +44,7 @@ func (r *WSSRemote) Handshake(ctx *context.Context, target *common.TargetAddr) (
 	if nil != err {
 		return nil, err
 	}
-	ec, err := common.NewChacha20Stream([]byte(config.Config.User), c.UnderlyingConn())
-	if nil != err {
-		return nil, err
-	}
+	ec := common.NewChacha20Stream([]byte(config.Config.User), c.UnderlyingConn())
 	tBuf := make([]byte, 8)
 	binary.BigEndian.PutUint64(tBuf, uint64(time.Now().Unix()))
 	_, err = ec.Write(tBuf)
