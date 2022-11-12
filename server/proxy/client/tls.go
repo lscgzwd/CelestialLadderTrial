@@ -46,14 +46,7 @@ func (r *TlsRemote) Handshake(ctx *context.Context, target *common.TargetAddr) (
 	if nil != err {
 		return nil, err
 	}
-	_, err = cc.Write([]byte("GET / HTTP/1.1\r\nHost: " + config.Config.Out.RemoteAddr + "\r\nConnection: keep-alive"))
-	if nil != err {
-		return nil, err
-	}
-	ec, err := common.NewChacha20Stream([]byte(config.Config.User), cc)
-	if nil != err {
-		return nil, err
-	}
+	ec := common.NewChacha20Stream([]byte(config.Config.User), cc)
 	tBuf := make([]byte, 8)
 	binary.BigEndian.PutUint64(tBuf, uint64(time.Now().Unix()))
 	_, err = ec.Write(tBuf)

@@ -35,13 +35,13 @@ type Chacha20Stream struct {
 	conn    net.Conn
 }
 
-func NewChacha20Stream(key []byte, conn net.Conn) (*Chacha20Stream, error) {
+func NewChacha20Stream(key []byte, conn net.Conn) *Chacha20Stream {
 	s := &Chacha20Stream{
 		key:  key, // should be exactly 32 bytes
 		conn: conn,
 	}
 
-	return s, nil
+	return s
 }
 
 func (s *Chacha20Stream) Read(p []byte) (int, error) {
