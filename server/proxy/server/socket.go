@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -76,27 +77,37 @@ func (s *SocketServer) Start(l net.Listener) {
 					"action":    config.ActionRequestBegin,
 					"errorCode": logger.ErrCodeHandshake,
 					"error":     err,
+					"remote":    remote.Name(),
+					"target":    target.String(),
 				})
-				wConn.Write(common.DefaultHtml)
+				_, _ = wConn.Write(common.DefaultHtml)
 				return
 			}
 			go func() {
 				_, err = io.Copy(rConn, wConn)
 				if nil != err {
-					logger.Error(gCtx, map[string]interface{}{
-						"action":    config.ActionSocketOperate,
-						"errorCode": logger.ErrCodeTransfer,
-						"error":     err,
-					})
+					if strings.Index(err.Error(), "closed") == -1 {
+						logger.Error(gCtx, map[string]interface{}{
+							"action":    config.ActionSocketOperate,
+							"errorCode": logger.ErrCodeTransfer,
+							"error":     err,
+							"remote":    remote.Name(),
+							"target":    target.String(),
+						})
+					}
 				}
 			}()
 			_, err = io.Copy(wConn, rConn)
 			if nil != err {
-				logger.Error(gCtx, map[string]interface{}{
-					"action":    config.ActionSocketOperate,
-					"errorCode": logger.ErrCodeTransfer,
-					"error":     err,
-				})
+				if strings.Index(err.Error(), "closed") == -1 {
+					logger.Error(gCtx, map[string]interface{}{
+						"action":    config.ActionSocketOperate,
+						"errorCode": logger.ErrCodeTransfer,
+						"error":     err,
+						"remote":    remote.Name(),
+						"target":    target.String(),
+					})
+				}
 			}
 		}()
 	}
@@ -184,4 +195,8 @@ func (s *SocketServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWr
 	}
 
 	return conn, addr, err
+}
+
+func (s *SocketServer) Name() string {
+	return "SocketServer"
 }

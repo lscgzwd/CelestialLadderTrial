@@ -15,10 +15,12 @@ import (
 type Server interface {
 	Start(l net.Listener)
 	Handshake(ctx *context.Context, conn net.Conn) (io.ReadWriter, *TargetAddr, error)
+	Name() string
 }
 
 type Remote interface {
 	Handshake(ctx *context.Context, target *TargetAddr) (io.ReadWriter, error)
+	Name() string
 }
 
 type CipherStream interface {

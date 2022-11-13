@@ -30,7 +30,6 @@ func (s *HttpServer) Start(l net.Listener) {
 		conn, _, err := hj.Hijack()
 		if err != nil {
 			http.Error(writer, "cannot hijack", http.StatusInternalServerError)
-			// _, _ = writer.Write(common.DefaultHtml)
 			return
 		}
 		defer conn.Close()
@@ -50,12 +49,38 @@ func (s *HttpServer) Start(l net.Listener) {
 				"action":    config.ActionRequestBegin,
 				"errorCode": logger.ErrCodeHandshake,
 				"error":     err,
+				"remote":    remote.Name(),
+				"target":    target.String(),
 			})
-			wConn.Write(common.DefaultHtml)
+			_, _ = wConn.Write(common.DefaultHtml)
 			return
 		}
-		go io.Copy(rConn, wConn)
-		io.Copy(wConn, rConn)
+		go func() {
+			_, err = io.Copy(rConn, wConn)
+			if nil != err {
+				if strings.Index(err.Error(), "closed") == -1 {
+					logger.Error(gCtx, map[string]interface{}{
+						"action":    config.ActionSocketOperate,
+						"errorCode": logger.ErrCodeTransfer,
+						"error":     err,
+						"remote":    remote.Name(),
+						"target":    target.String(),
+					})
+				}
+			}
+		}()
+		_, err = io.Copy(wConn, rConn)
+		if nil != err {
+			if strings.Index(err.Error(), "closed") == -1 {
+				logger.Error(gCtx, map[string]interface{}{
+					"action":    config.ActionSocketOperate,
+					"errorCode": logger.ErrCodeTransfer,
+					"error":     err,
+					"remote":    remote.Name(),
+					"target":    target.String(),
+				})
+			}
+		}
 	}))
 	gCtx := context.NewContext()
 	if nil != err {
@@ -106,4 +131,8 @@ func (s *HttpServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWrit
 		target.IP = ip
 	}
 	return conn, target, nil
+}
+
+func (s *HttpServer) Name() string {
+	return "HttpServer"
 }

@@ -72,3 +72,7 @@ func (r *WSSRemote) Handshake(ctx *context.Context, target *common.TargetAddr) (
 
 	return ec, err
 }
+
+func (r *WSSRemote) Name() string {
+	return "WSSRemote"
+}

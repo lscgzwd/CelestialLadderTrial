@@ -68,6 +68,8 @@ func (s *WSSServer) Start(l net.Listener) {
 				"action":    config.ActionRequestBegin,
 				"errorCode": logger.ErrCodeHandshake,
 				"error":     err,
+				"remote":    remote.Name(),
+				"target":    target.String(),
 			})
 			_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"code":0, "data":[], "message":"success"}`))
 			return
@@ -75,22 +77,28 @@ func (s *WSSServer) Start(l net.Listener) {
 		go func() {
 			_, err = io.Copy(rConn, wConn)
 			if nil != err {
-				logger.Error(gCtx, map[string]interface{}{
-					"action":    config.ActionSocketOperate,
-					"errorCode": logger.ErrCodeTransfer,
-					"error":     err,
-				})
-				_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"code":0, "data":[], "message":"success"}`))
+				if strings.Index(err.Error(), "closed") == -1 {
+					logger.Error(gCtx, map[string]interface{}{
+						"action":    config.ActionSocketOperate,
+						"errorCode": logger.ErrCodeTransfer,
+						"error":     err,
+						"remote":    remote.Name(),
+						"target":    target.String(),
+					})
+				}
 			}
 		}()
 		_, err = io.Copy(wConn, rConn)
 		if nil != err {
-			logger.Error(gCtx, map[string]interface{}{
-				"action":    config.ActionSocketOperate,
-				"errorCode": logger.ErrCodeTransfer,
-				"error":     err,
-			})
-			_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"code":0, "data":[], "message":"success"}`))
+			if strings.Index(err.Error(), "closed") == -1 {
+				logger.Error(gCtx, map[string]interface{}{
+					"action":    config.ActionSocketOperate,
+					"errorCode": logger.ErrCodeTransfer,
+					"error":     err,
+					"remote":    remote.Name(),
+					"target":    target.String(),
+				})
+			}
 		}
 	}))
 	gCtx := context.NewContext()
@@ -167,4 +175,8 @@ func (s *WSSServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWrite
 		target.IP = ip
 	}
 	return ec, target, nil
+}
+
+func (s *WSSServer) Name() string {
+	return "WSSServer"
 }

@@ -177,7 +177,7 @@ func GetRemote(ctx *context.Context, target *common.TargetAddr) common.Remote {
 					"action":    config.ActionSocketOperate,
 					"errorCode": logger.ErrCodeHandshake,
 					"error":     err,
-				})
+				}, "ECSQuery")
 				return &client.DirectRemote{}
 			}
 			var ip string

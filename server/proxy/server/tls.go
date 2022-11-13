@@ -17,8 +17,6 @@ import (
 	"proxy/utils/logger"
 )
 
-var tlsConfig *tls.Config
-
 type TlsServer struct {
 	Type     int8
 	Port     int
@@ -26,9 +24,10 @@ type TlsServer struct {
 }
 
 func (s *TlsServer) Start(l net.Listener) {
-	//
+	// begin accept connection
 	for {
 		conn, err := l.Accept()
+		// process connection in go routing
 		go func() {
 			defer conn.Close()
 			gCtx := context.NewContext()
@@ -40,15 +39,29 @@ func (s *TlsServer) Start(l net.Listener) {
 				})
 				return
 			}
+			// catch panic
+			defer func() {
+				err := recover() // 内置函数，可以捕捉到函数异常
+				if err != nil {
+					// 这里是打印错误，还可以进行报警处理，例如微信，邮箱通知
+					logger.Error(gCtx, map[string]interface{}{
+						"action":    config.ActionRequestBegin,
+						"errorCode": logger.ErrCodeHandshake,
+						"error":     err,
+					})
+				}
+			}()
 			wConn, target, err := s.Handshake(gCtx, conn)
 			if nil != err {
 				logger.Error(gCtx, map[string]interface{}{
 					"action":    config.ActionRequestBegin,
 					"errorCode": logger.ErrCodeHandshake,
 					"error":     err,
+					"name":      s.Name(),
 				})
 				return
 			}
+			// get remote connection by policy
 			remote := route.GetRemote(gCtx, target)
 			rConn, err := remote.Handshake(gCtx, target)
 			if nil != err {
@@ -56,6 +69,8 @@ func (s *TlsServer) Start(l net.Listener) {
 					"action":    config.ActionRequestBegin,
 					"errorCode": logger.ErrCodeHandshake,
 					"error":     err,
+					"remote":    remote.Name(),
+					"target":    target.String(),
 				})
 				_, _ = wConn.Write(common.DefaultHtml)
 				return
@@ -63,20 +78,28 @@ func (s *TlsServer) Start(l net.Listener) {
 			go func() {
 				_, err = io.Copy(rConn, wConn)
 				if nil != err {
-					logger.Error(gCtx, map[string]interface{}{
-						"action":    config.ActionSocketOperate,
-						"errorCode": logger.ErrCodeTransfer,
-						"error":     err,
-					})
+					if strings.Index(err.Error(), "closed") == -1 {
+						logger.Error(gCtx, map[string]interface{}{
+							"action":    config.ActionSocketOperate,
+							"errorCode": logger.ErrCodeTransfer,
+							"error":     err,
+							"remote":    remote.Name(),
+							"target":    target.String(),
+						})
+					}
 				}
 			}()
 			_, err = io.Copy(wConn, rConn)
 			if nil != err {
-				logger.Error(gCtx, map[string]interface{}{
-					"action":    config.ActionSocketOperate,
-					"errorCode": logger.ErrCodeTransfer,
-					"error":     err,
-				})
+				if strings.Index(err.Error(), "closed") == -1 {
+					logger.Error(gCtx, map[string]interface{}{
+						"action":    config.ActionSocketOperate,
+						"errorCode": logger.ErrCodeTransfer,
+						"error":     err,
+						"remote":    remote.Name(),
+						"target":    target.String(),
+					})
+				}
 			}
 		}()
 	}
@@ -177,4 +200,8 @@ func (s *TlsServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWrite
 		target.IP = ip
 	}
 	return ec, target, nil
+}
+
+func (s *TlsServer) Name() string {
+	return "TlsServer"
 }
