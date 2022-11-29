@@ -157,6 +157,16 @@ func (s *TlsServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWrite
 		return nil, nil, errors.New("The time between server and client must same.")
 	}
 
+	pBuf := make([]byte, 1)
+	_, err = ec.Read(pBuf)
+	if nil != err {
+		return nil, nil, err
+	}
+	var proto = binary.BigEndian.Uint16(pBuf)
+	if proto != 1 && proto != 3 {
+		return nil, nil, errors.New("not support.")
+	}
+
 	dlBuf := make([]byte, 2)
 	_, err = ec.Read(dlBuf)
 	if nil != err {
@@ -192,7 +202,8 @@ func (s *TlsServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWrite
 	}
 	ip := net.ParseIP(host)
 	var target = &common.TargetAddr{
-		Port: port,
+		Port:  port,
+		Proto: proto,
 	}
 	if nil == ip {
 		target.Name = host

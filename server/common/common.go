@@ -102,9 +102,10 @@ func (s *Chacha20Stream) Close() error {
 
 // TargetAddr An Addr represents an address that you want to access by proxy. Either Name or IP is used exclusively.
 type TargetAddr struct {
-	Name string // fully-qualified domain name
-	IP   net.IP
-	Port int
+	Name  string // fully-qualified domain name
+	IP    net.IP
+	Port  int
+	Proto uint16 // protocol 1: tcp 3: udp
 }
 
 // Return host:port string

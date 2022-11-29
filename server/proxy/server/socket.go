@@ -158,10 +158,15 @@ func (s *SocketServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWr
 		return nil, nil, fmt.Errorf("failed to read command: %w", err)
 	}
 	cmd := buf[1]
-	if cmd != CmdConnect {
+	addr := &common.TargetAddr{}
+	switch cmd {
+	case CmdConnect:
+		addr.Proto = 1
+	case CmdUDPAssociate:
+		addr.Proto = 3
+	default:
 		return nil, nil, fmt.Errorf("unsuppoted command %v", cmd)
 	}
-	addr := &common.TargetAddr{}
 	l := 2
 	off := 4
 	switch buf[3] {
