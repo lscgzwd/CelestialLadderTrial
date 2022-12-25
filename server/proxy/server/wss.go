@@ -74,6 +74,15 @@ func (s *WSSServer) Start(l net.Listener) {
 			_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"code":0, "data":[], "message":"success"}`))
 			return
 		}
+		defer func() {
+			_ = wConn.(*common.Chacha20Stream).Close()
+			switch rConn.(type) {
+			case net.Conn:
+				_ = rConn.(net.Conn).Close()
+			case *common.Chacha20Stream:
+				_ = rConn.(*common.Chacha20Stream).Close()
+			}
+		}()
 		go func() {
 			_, err = io.Copy(rConn, wConn)
 			if nil != err {

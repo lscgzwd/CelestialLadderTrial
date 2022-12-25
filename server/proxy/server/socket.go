@@ -1,9 +1,11 @@
 package server
 
 import (
+	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strings"
 	"time"
 
@@ -83,8 +85,74 @@ func (s *SocketServer) Start(l net.Listener) {
 				_, _ = wConn.Write(common.DefaultHtml)
 				return
 			}
-			go func() {
-				_, err = io.Copy(rConn, wConn)
+			defer func() {
+				_ = wConn.(net.Conn).Close()
+				switch rConn.(type) {
+				case net.Conn:
+					_ = rConn.(net.Conn).Close()
+				case *common.Chacha20Stream:
+					_ = rConn.(*common.Chacha20Stream).Close()
+				}
+			}()
+			if target.Proto == 3 {
+				done := make(chan error, 1)
+				// relay from tcp to udp
+				go func() {
+					//defer rConn.SetReadDeadline(time.Now()) // wake up anthoer goroutine
+					buf := make([]byte, 65535)
+					for {
+						n, err := rConn.Read(buf)
+						if err != nil {
+							done <- err
+							return
+						}
+						_, err = target.UdpConn.WriteTo(buf[:n], target.UdpAddr)
+						if err != nil {
+							done <- err
+							return
+						}
+					}
+				}()
+
+				// relay from udp to tcp
+				var n int
+				buf := make([]byte, 65535)
+				for {
+					n, _, err = target.UdpConn.ReadFrom(buf)
+					if err != nil {
+						break
+					}
+					_, err = rConn.Write(buf[:n])
+					if err != nil {
+						break
+					}
+				}
+				//wConn.SetReadDeadline(time.Now()) // wake up anthoer goroutine
+
+				// ignore timeout error.
+				err1 := <-done
+				if !errors.Is(err, os.ErrDeadlineExceeded) {
+					return
+				}
+				if !errors.Is(err1, os.ErrDeadlineExceeded) {
+					return
+				}
+			} else {
+				go func() {
+					_, err = io.Copy(rConn, wConn)
+					if nil != err {
+						if strings.Index(err.Error(), "closed") == -1 {
+							logger.Error(gCtx, map[string]interface{}{
+								"action":    config.ActionSocketOperate,
+								"errorCode": logger.ErrCodeTransfer,
+								"error":     err,
+								"remote":    remote.Name(),
+								"target":    target.String(),
+							})
+						}
+					}
+				}()
+				_, err = io.Copy(wConn, rConn)
 				if nil != err {
 					if strings.Index(err.Error(), "closed") == -1 {
 						logger.Error(gCtx, map[string]interface{}{
@@ -95,18 +163,6 @@ func (s *SocketServer) Start(l net.Listener) {
 							"target":    target.String(),
 						})
 					}
-				}
-			}()
-			_, err = io.Copy(wConn, rConn)
-			if nil != err {
-				if strings.Index(err.Error(), "closed") == -1 {
-					logger.Error(gCtx, map[string]interface{}{
-						"action":    config.ActionSocketOperate,
-						"errorCode": logger.ErrCodeTransfer,
-						"error":     err,
-						"remote":    remote.Name(),
-						"target":    target.String(),
-					})
 				}
 			}
 		}()
@@ -164,6 +220,32 @@ func (s *SocketServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWr
 		addr.Proto = 1
 	case CmdUDPAssociate:
 		addr.Proto = 3
+		ip := conn.LocalAddr().(*net.TCPAddr).IP
+		udpAddr := &net.UDPAddr{IP: ip, Port: 0}
+		udpConn, err := net.ListenUDP("udp", udpAddr)
+		if nil != err {
+			return nil, nil, fmt.Errorf("cannot listen udp %+v", err)
+		}
+		udpAddr.Port = udpConn.LocalAddr().(*net.UDPAddr).Port
+		addr.UdpAddr = udpAddr
+		addr.UdpConn = udpConn
+		res := make([]byte, 0, 22)
+		if ip := ip.To4(); ip != nil {
+			//IPv4, len is 4
+			res = append(res, []byte{Version5, 0x00, 0x00, ATypIP4}...)
+			res = append(res, ip...)
+		} else {
+			// IPv6, len is 16
+			res = append(res, []byte{Version5, 0x00, 0x00, ATypIP6}...)
+			res = append(res, ip...)
+		}
+
+		portByte := [2]byte{}
+		binary.BigEndian.PutUint16(portByte[:], uint16(udpAddr.Port))
+		res = append(res, portByte[:]...)
+		if _, err := conn.Write(res); err != nil {
+			return nil, nil, fmt.Errorf("reply accept udp err %+v", err)
+		}
 	default:
 		return nil, nil, fmt.Errorf("unsuppoted command %v", cmd)
 	}

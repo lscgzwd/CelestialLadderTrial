@@ -28,7 +28,20 @@ func (r *DirectRemote) Handshake(ctx *context.Context, target *common.TargetAddr
 			})
 		}
 	}()
-	return net.DialTimeout("tcp", target.String(), 10*time.Second)
+	switch target.Proto {
+	case 3:
+		udpAddr := &net.UDPAddr{IP: target.IP, Port: target.Port}
+		target.RUdpAddr = udpAddr
+
+		udpConn, err := net.DialUDP("udp", nil, udpAddr)
+		if nil != err {
+			return nil, err
+		}
+		target.RUdpConn = udpConn
+		return udpConn, nil
+	default:
+		return net.DialTimeout("tcp", target.String(), 10*time.Second)
+	}
 }
 func (r *DirectRemote) Name() string {
 	return "DirectRemote"
