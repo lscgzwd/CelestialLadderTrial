@@ -51,7 +51,7 @@ func (r *WSSRemote) Handshake(ctx *context.Context, target *common.TargetAddr) (
 	if nil != err {
 		return nil, err
 	}
-	pBuf := make([]byte, 1)
+	pBuf := make([]byte, 2)
 	binary.BigEndian.PutUint16(pBuf, target.Proto)
 	_, err = ec.Write(pBuf)
 	if nil != err {

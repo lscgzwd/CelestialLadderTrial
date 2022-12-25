@@ -4,6 +4,7 @@ go 1.19
 
 require (
 	github.com/caddyserver/certmagic v0.17.2
+	github.com/go-errors/errors v1.4.2
 	github.com/gorilla/websocket v1.5.0
 	github.com/lestrrat-go/file-rotatelogs v2.4.0+incompatible
 	github.com/likexian/doh-go v0.6.4

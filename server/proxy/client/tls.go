@@ -8,7 +8,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/go-errors/errors"
 	"proxy/config"
 	"proxy/server/common"
 	"proxy/utils/context"
@@ -18,18 +18,20 @@ import (
 type TlsRemote struct {
 }
 
-func (r *TlsRemote) Handshake(ctx *context.Context, target *common.TargetAddr) (io.ReadWriter, error) {
+func (r *TlsRemote) Handshake(ctx *context.Context, target *common.TargetAddr) (ec io.ReadWriter, err error) {
 	// 在函数退出前，执行defer
 	// 捕捉异常后，程序不会异常退出
 	defer func() {
-		err := recover() // 内置函数，可以捕捉到函数异常
-		if err != nil {
+		r := recover() // 内置函数，可以捕捉到函数异常
+		if r != nil {
 			// 这里是打印错误，还可以进行报警处理，例如微信，邮箱通知
 			logger.Error(ctx, map[string]interface{}{
 				"action":    config.ActionRequestBegin,
 				"errorCode": logger.ErrCodeHandshake,
 				"error":     err,
 			})
+			err = r.(error)
+			fmt.Println(string(errors.Wrap(err, 3).Stack()))
 		}
 	}()
 	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%s", config.Config.Out.RemoteAddr, "443"), 10*time.Second)
@@ -46,14 +48,14 @@ func (r *TlsRemote) Handshake(ctx *context.Context, target *common.TargetAddr) (
 	if nil != err {
 		return nil, err
 	}
-	ec := common.NewChacha20Stream([]byte(config.Config.User), cc)
+	ec = common.NewChacha20Stream([]byte(config.Config.User), cc)
 	tBuf := make([]byte, 8)
 	binary.BigEndian.PutUint64(tBuf, uint64(time.Now().Unix()))
 	_, err = ec.Write(tBuf)
 	if nil != err {
 		return nil, err
 	}
-	pBuf := make([]byte, 1)
+	pBuf := make([]byte, 2)
 	binary.BigEndian.PutUint16(pBuf, target.Proto)
 	_, err = ec.Write(pBuf)
 	if nil != err {

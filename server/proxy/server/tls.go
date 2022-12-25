@@ -166,7 +166,7 @@ func (s *TlsServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWrite
 		return nil, nil, errors.New("The time between server and client must same.")
 	}
 
-	pBuf := make([]byte, 1)
+	pBuf := make([]byte, 2)
 	_, err = ec.Read(pBuf)
 	if nil != err {
 		return nil, nil, err
