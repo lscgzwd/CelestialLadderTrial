@@ -3,10 +3,10 @@
 package tun
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 	"os"
-	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -34,8 +34,9 @@ func newDevice(config *Config) (Device, error) {
 
 	file := os.NewFile(uintptr(fd), "/dev/net/tun")
 	return &linuxDevice{
-		file:   file,
-		name:   ifr.Name(),
+		file: file,
+		// Ifreq.Name 是定长字节数组，这里需要去掉尾部的 0
+		name:   string(bytes.Trim(ifr.Name[:], "\x00")),
 		config: config,
 	}, nil
 }
@@ -128,5 +129,3 @@ func configureLinux(ifr *Ifreq, config *Config) error {
 
 	return nil
 }
-
-

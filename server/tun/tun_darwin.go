@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"syscall"
-	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
@@ -103,5 +101,3 @@ func configureDarwin(fd int, config *Config) error {
 
 	return nil
 }
-
-

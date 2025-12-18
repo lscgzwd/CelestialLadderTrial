@@ -15,7 +15,7 @@ const (
 
 // IPPacket IP数据包结构
 type IPPacket struct {
-	Version    uint8  // IP版本
+	Version   uint8  // IP版本
 	HeaderLen uint8  // 头部长度（4字节单位）
 	TOS       uint8  // 服务类型
 	TotalLen  uint16 // 总长度
@@ -136,6 +136,29 @@ func ParseUDPPacket(data []byte) (*UDPPacket, error) {
 	return pkt, nil
 }
 
+// BuildUDPPacket 构建UDP数据包（不计算校验和，IPv4 下可选）
+func BuildUDPPacket(srcPort, dstPort uint16, payload []byte) []byte {
+	headerLen := 8
+	totalLen := headerLen + len(payload)
+
+	packet := make([]byte, totalLen)
+
+	// 源端口和目标端口
+	binary.BigEndian.PutUint16(packet[0:2], srcPort)
+	binary.BigEndian.PutUint16(packet[2:4], dstPort)
+
+	// 长度字段（包含头部）
+	binary.BigEndian.PutUint16(packet[4:6], uint16(totalLen))
+
+	// 校验和（IPv4 可选，这里先置 0，交给内核/对端处理）
+	binary.BigEndian.PutUint16(packet[6:8], 0)
+
+	// 负载
+	copy(packet[8:], payload)
+
+	return packet
+}
+
 // BuildIPPacket 构建IP数据包
 func BuildIPPacket(srcIP, dstIP net.IP, protocol uint8, data []byte) []byte {
 	headerLen := 20
@@ -148,7 +171,7 @@ func BuildIPPacket(srcIP, dstIP net.IP, protocol uint8, data []byte) []byte {
 	packet[1] = 0x00 // TOS
 	binary.BigEndian.PutUint16(packet[2:4], uint16(totalLen))
 	binary.BigEndian.PutUint16(packet[4:6], 0) // ID
-	packet[6] = 0x40                             // Flags, Fragment Offset
+	packet[6] = 0x40                           // Flags, Fragment Offset
 	packet[7] = 0x00
 	packet[8] = 64 // TTL
 	packet[9] = protocol
@@ -183,5 +206,3 @@ func calculateChecksum(data []byte) uint16 {
 	}
 	return ^uint16(sum)
 }
-
-

@@ -97,14 +97,17 @@ func (h *Handler) handlePacket(ipPkt *IPPacket) {
 	// 处理DNS查询（UDP 53端口）
 	if ipPkt.Protocol == IPProtocolUDP {
 		udpPkt, err := ParseUDPPacket(ipPkt.Data)
-		if err == nil && udpPkt.DstPort == 53 {
-			// DNS查询，使用DNS处理器
-			response, err := h.dnsHandler.HandleDNSQuery(ipPkt, udpPkt)
-			if err == nil && response != nil {
-				// 写回TUN接口
-				_, _ = h.device.Write(response, 0)
+		if err == nil {
+			// DNS 查询单独处理
+			if udpPkt.DstPort == 53 {
+				// DNS查询，使用DNS处理器
+				response, err := h.dnsHandler.HandleDNSQuery(ipPkt, udpPkt)
+				if err == nil && response != nil {
+					// 写回TUN接口
+					_, _ = h.device.Write(response, 0)
+				}
+				return
 			}
-			return
 		}
 	}
 
@@ -177,8 +180,20 @@ func (h *Handler) handlePacket(ipPkt *IPPacket) {
 	} else if ipPkt.Protocol == IPProtocolUDP {
 		udpPkt, err := ParseUDPPacket(ipPkt.Data)
 		if err == nil && len(udpPkt.Data) > 0 {
-			// UDP处理（简化实现）
-			// TODO: 实现UDP转发
+			// UDP 转发：直接将负载写入远端连接
+			conn.mu.Lock()
+			if conn.conn != nil && !conn.closed {
+				_, err = conn.conn.Write(udpPkt.Data)
+				if err != nil {
+					logger.Error(h.ctx, map[string]interface{}{
+						"action":    config.ActionSocketOperate,
+						"errorCode": logger.ErrCodeTransfer,
+						"error":     err,
+					}, "failed to write UDP payload to remote")
+					conn.closed = true
+				}
+			}
+			conn.mu.Unlock()
 		}
 	}
 }
@@ -265,13 +280,31 @@ func (h *Handler) forwardSocks5ToTun(conn *Connection) {
 			continue
 		}
 
-		// 构建IP数据包
-		ipPkt := BuildIPPacket(
-			conn.DstIP, // 源IP（目标服务器）
-			conn.SrcIP, // 目标IP（客户端）
-			conn.Protocol,
-			buf[:n],
-		)
+		var ipPkt []byte
+
+		if conn.Protocol == IPProtocolUDP {
+			// 对于 UDP，需要先构建 UDP 头，再封装到 IP 包中
+			udpPkt := BuildUDPPacket(
+				conn.DstPort, // 源端口（目标服务器端口）
+				conn.SrcPort, // 目标端口（客户端端口）
+				buf[:n],      // 负载
+			)
+
+			ipPkt = BuildIPPacket(
+				conn.DstIP, // 源IP（目标服务器）
+				conn.SrcIP, // 目标IP（客户端）
+				IPProtocolUDP,
+				udpPkt,
+			)
+		} else {
+			// TCP 目前仅转发负载（简化实现）
+			ipPkt = BuildIPPacket(
+				conn.DstIP, // 源IP（目标服务器）
+				conn.SrcIP, // 目标IP（客户端）
+				conn.Protocol,
+				buf[:n],
+			)
+		}
 
 		// 写回TUN
 		_, err = h.device.Write(ipPkt, 0)

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"runtime"
 
 	"proxy/config"
@@ -109,10 +110,8 @@ func NewService() (*Service, error) {
 
 	// 配置IP地址（平台特定）
 	if err := configureDeviceIP(device, tunConfig); err != nil {
-		logger.Warn(ctx, map[string]interface{}{
-			"action": config.ActionRuntime,
-			"error":  err,
-		}, "failed to configure device IP, may need manual configuration")
+		device.Close()
+		return nil, fmt.Errorf("failed to configure TUN device IP: %w", err)
 	}
 
 	// 创建路由管理器
@@ -195,13 +194,58 @@ func (s *Service) Stop() error {
 }
 
 // configureDeviceIP 配置设备IP地址（平台特定）
-func configureDeviceIP(device Device, config *Config) error {
-	// 这个函数在不同平台有不同的实现
-	// Windows: 使用winipcfg或netsh命令
-	// Linux: 使用ip命令或netlink
-	// macOS: 使用ifconfig命令
-	// 这里暂时返回nil，实际实现应该在平台特定文件中
-	return nil
+func configureDeviceIP(device Device, cfg *Config) error {
+	name := device.Name()
+	if name == "" {
+		return fmt.Errorf("device name is empty")
+	}
+
+	ipAddr := cfg.Address
+	if ipAddr == nil {
+		ipAddr = net.ParseIP("10.0.0.1")
+	}
+	if ipAddr.To4() == nil {
+		return fmt.Errorf("only IPv4 is supported")
+	}
+
+	prefixLen := 24
+	if cfg.Netmask != nil {
+		if ones, _ := cfg.Netmask.Size(); ones > 0 {
+			prefixLen = ones
+		}
+	}
+
+	switch runtime.GOOS {
+	case "windows":
+		// Windows 在 tun_windows.go 中已经通过 netsh 配置过 IP，这里不重复配置
+		return nil
+
+	case "linux":
+		// 使用 ip 命令配置：ip addr add <ip>/<prefix> dev <name>
+		cidr := fmt.Sprintf("%s/%d", ipAddr.String(), prefixLen)
+		cmd := exec.Command("ip", "addr", "add", cidr, "dev", name)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("linux: failed to add addr %s on %s: %w, output: %s", cidr, name, err, string(out))
+		}
+		// 启动接口：ip link set <name> up
+		cmd = exec.Command("ip", "link", "set", name, "up")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("linux: failed to set link up on %s: %w, output: %s", name, err, string(out))
+		}
+		return nil
+
+	case "darwin":
+		// macOS 使用 ifconfig 配置：ifconfig <name> inet <ip> <ip> netmask <mask> up
+		mask := net.CIDRMask(prefixLen, 32)
+		maskIP := net.IP(mask).String()
+		cmd := exec.Command("ifconfig", name, "inet", ipAddr.String(), ipAddr.String(), "netmask", maskIP, "up")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("darwin: failed to configure %s: %w, output: %s", name, err, string(out))
+		}
+		return nil
+
+	default:
+		// 其他平台暂不支持
+		return nil
+	}
 }
-
-
