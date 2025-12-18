@@ -18,7 +18,18 @@ type config struct {
 	BlackList   []string `json:"black_list"`
 	ChinaIpFile string   `json:"china_ip_file"`
 	GFWListFile string   `json:"gfw_list_file"`
-	Log         struct {
+	Tun         struct {
+		Enable  bool     `json:"enable"`
+		Name    string   `json:"name"`
+		Address string   `json:"address"`
+		Netmask string   `json:"netmask"`
+		MTU     int      `json:"mtu"`
+		DNS     []string `json:"dns"`
+	} `json:"tun"`
+	SystemProxy struct {
+		Enable bool `json:"enable"` // 是否自动配置系统代理
+	} `json:"system_proxy"`
+	Log struct {
 		Path     string `json:"path"`
 		Level    string `json:"level"`
 		FileName string `json:"file_name"`

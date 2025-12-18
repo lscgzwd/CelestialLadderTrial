@@ -6,6 +6,7 @@ import (
 	"syscall"
 
 	"proxy/config"
+	"proxy/server"
 	_ "proxy/server"
 	"proxy/utils/context"
 	"proxy/utils/logger"
@@ -26,6 +27,12 @@ func main() {
 		logger.Info(gCtx, map[string]interface{}{
 			"action": config.ActionRuntime,
 		}, "Server Shutdown...")
+		// 停止TUN服务
+		server.StopTunService()
+		// 恢复系统代理配置
+		if config.Config.SystemProxy.Enable {
+			server.RestoreSystemProxy(gCtx)
+		}
 		done <- true
 	}()
 	<-done

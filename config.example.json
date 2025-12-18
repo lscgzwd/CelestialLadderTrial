@@ -16,6 +16,17 @@
   "black_list": [],
   "china_ip_file": "china_ip.txt",
   "gfw_list_file": "gfwlist.txt",
+  "system_proxy": {
+    "enable": false
+  },
+  "tun": {
+    "enable": false,
+    "name": "clt0",
+    "address": "10.0.0.1",
+    "netmask": "255.255.255.0",
+    "mtu": 1500,
+    "dns": ["8.8.8.8", "8.8.4.4"]
+  },
   "log": {
     "path": "./",
     "level": "info",

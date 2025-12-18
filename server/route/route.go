@@ -33,6 +33,12 @@ var cnIp = make(map[uint8][]ipRange)
 var gfw *gfwlist.GFWList
 
 func init() {
+	// 注册配置重载回调
+	config.RegisterReloadCallback(func() {
+		// 重新加载规则引擎
+		GetRuleEngine().ReloadRules()
+	})
+	
 	var err error
 	if len(config.Config.GFWListFile) == 0 {
 		config.Config.GFWListFile = "gfwlist.txt"
@@ -227,20 +233,26 @@ func GetRemote(ctx *context.Context, target *common.TargetAddr) common.Remote {
 
 // IsWhite check white list
 func IsWhite(target string) bool {
-	for _, v := range config.Config.WhiteList {
-		if strings.Contains(target, v) {
-			return true
-		}
+	// 解析目标地址获取IP
+	var ip net.IP
+	if addr, err := common.NewTargetAddr(target); err == nil {
+		ip = addr.IP
 	}
-	return false
+
+	// 使用规则引擎检查
+	engine := GetRuleEngine()
+	return engine.IsWhite(target, ip)
 }
 
 // IsBlack check black list
 func IsBlack(target string) bool {
-	for _, v := range config.Config.BlackList {
-		if strings.Contains(target, v) {
-			return true
-		}
+	// 解析目标地址获取IP
+	var ip net.IP
+	if addr, err := common.NewTargetAddr(target); err == nil {
+		ip = addr.IP
 	}
-	return false
+
+	// 使用规则引擎检查
+	engine := GetRuleEngine()
+	return engine.IsBlack(target, ip)
 }

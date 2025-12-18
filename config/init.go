@@ -77,6 +77,14 @@ func init() {
 		fmt.Printf("parse config with error：%+v", err)
 		os.Exit(1)
 	}
+
+	// 启动配置文件监控（如果启用TUN或需要热重载）
+	if Config.Tun.Enable {
+		if err := StartConfigWatcher(c); err != nil {
+			// 配置文件监控失败不影响启动，只记录警告
+			fmt.Printf("启动配置文件监控失败：%+v\n", err)
+		}
+	}
 	if Config.In.Type == ServerTypeTLS {
 		if len(Config.In.ServerName) < 3 {
 			fmt.Printf("domain is wrong：%s", Config.In.ServerName)
