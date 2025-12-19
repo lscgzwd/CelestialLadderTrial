@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"runtime"
 
 	"proxy/config"
+	"proxy/server/common"
 	"proxy/server/route"
 	"proxy/utils/context"
 	"proxy/utils/logger"
@@ -15,10 +15,11 @@ import (
 
 // Service TUN服务
 type Service struct {
-	device      Device
-	handler     *Handler
+	tun2socks   *Tun2SocksService
 	routeMgr    *route.RouteManager
 	ipAllocator *IPAllocator
+	tunIP       net.IP
+	tunMask     net.IPMask
 	ctx         *context.Context
 }
 
@@ -33,7 +34,7 @@ func NewService() (*Service, error) {
 		if runtime.GOOS == "windows" {
 			// Windows: 尝试提升权限
 			if err := elevatePrivileges(); err != nil {
-				return nil, fmt.Errorf("TUN 模式需要管理员权限。尝试自动提升权限失败: %v。请右键以“管理员身份运行”启动此程序", err)
+				return nil, fmt.Errorf("TUN 模式需要管理员权限。尝试自动提升权限失败: %v。请右键以管理员身份运行启动此程序", err)
 			}
 			// 权限提升成功，当前进程退出，新进程会以管理员权限启动
 			os.Exit(0)
@@ -60,91 +61,52 @@ func NewService() (*Service, error) {
 		"gateway": gatewayIP.String(),
 	}, "found available network")
 
-	// 创建TUN配置
-	tunConfig := &Config{
-		Name:    config.Config.Tun.Name,
-		Address: gatewayIP,
-		Netmask: network.Mask,
-		MTU:     config.Config.Tun.MTU,
-	}
-
-	// 解析DNS配置
-	if len(config.Config.Tun.DNS) > 0 {
-		tunConfig.DNS = make([]net.IP, 0, len(config.Config.Tun.DNS))
-		for _, dnsStr := range config.Config.Tun.DNS {
-			if dnsIP := net.ParseIP(dnsStr); dnsIP != nil {
-				tunConfig.DNS = append(tunConfig.DNS, dnsIP)
-			}
-		}
-	}
-
-	// 如果没有配置DNS，使用默认值
-	if len(tunConfig.DNS) == 0 {
-		tunConfig.DNS = []net.IP{
-			net.ParseIP("8.8.8.8"),
-			net.ParseIP("8.8.4.4"),
-		}
-	}
-
-	// 如果没有配置名称，使用默认值
-	if tunConfig.Name == "" {
-		tunConfig.Name = "clt0"
-	}
-
-	// 如果没有配置MTU，使用默认值
-	if tunConfig.MTU == 0 {
-		tunConfig.MTU = 1500
-	}
-
-	// 创建TUN设备
-	device, err := New(tunConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create TUN device: %w", err)
-	}
-
-	// 启动TUN接口
-	if err := device.Up(); err != nil {
-		device.Close()
-		return nil, fmt.Errorf("failed to start TUN device: %w", err)
-	}
-
-	// 配置IP地址（平台特定）
-	if err := configureDeviceIP(device, tunConfig); err != nil {
-		device.Close()
-		return nil, fmt.Errorf("failed to configure TUN device IP: %w", err)
+	// 设置原接口 IP（在 TUN 启动前，用于远程连接绑定）
+	originalIP := getOriginalInterfaceIP()
+	if originalIP != nil {
+		common.SetOriginalInterfaceIP(ctx, originalIP)
 	}
 
 	// 创建路由管理器
-	routeMgr := route.NewRouteManager(device.Name(), gatewayIP.String())
-	
-	// 设置全局路由管理器，供 TUN handler 使用
+	tunName := config.Config.Tun.Name
+	if tunName == "" {
+		tunName = "clt0"
+	}
+	routeMgr := route.NewRouteManager(tunName, gatewayIP.String())
+
+	// 设置全局路由管理器，供其他模块使用
 	route.SetGlobalRouteManager(routeMgr)
 
 	// 备份路由表（此时 TUN 还未接管流量，DNS 查询正常）
 	if err := routeMgr.BackupRoutes(ctx); err != nil {
-		device.Close()
 		return nil, fmt.Errorf("failed to backup routes: %w", err)
 	}
 
 	// 配置路由表（包括为远程服务器添加直连路由）
 	// 注意：必须在 TUN 启动前配置，确保远程服务器路由已添加
 	if err := routeMgr.SetupRoutes(ctx); err != nil {
-		device.Close()
 		routeMgr.RestoreRoutes(ctx)
 		return nil, fmt.Errorf("failed to setup routes: %w", err)
 	}
 
-	// 创建SOCKS5地址
+	// 创建 SOCKS5 地址
 	socks5Addr := fmt.Sprintf("127.0.0.1:%d", config.Config.In.Port)
 
-	// 创建处理器
-	handler := NewHandler(device, socks5Addr)
+	// 获取 MTU
+	mtu := config.Config.Tun.MTU
+	if mtu == 0 {
+		mtu = 1500
+	}
+
+	// 创建 tun2socks 服务
+	tun2socks := NewTun2SocksService(tunName, socks5Addr, gatewayIP, network.Mask, mtu)
 
 	return &Service{
-		device:      device,
-		handler:     handler,
+		tun2socks:   tun2socks,
 		routeMgr:    routeMgr,
 		ipAllocator: ipAllocator,
+		tunIP:       gatewayIP,
+		tunMask:     network.Mask,
 		ctx:         ctx,
 	}, nil
 }
@@ -155,12 +117,17 @@ func (s *Service) Start() error {
 		return nil
 	}
 
+	// 启动 tun2socks
+	if err := s.tun2socks.Start(); err != nil {
+		return fmt.Errorf("failed to start tun2socks: %w", err)
+	}
+
 	logger.Info(s.ctx, map[string]interface{}{
 		"action": config.ActionRuntime,
+		"tunIP":  s.tunIP.String(),
 	}, "TUN service started")
 
-	// 启动数据包处理循环
-	return s.handler.Start()
+	return nil
 }
 
 // Stop 停止TUN服务
@@ -173,21 +140,14 @@ func (s *Service) Stop() error {
 		"action": config.ActionRuntime,
 	}, "TUN service stopping")
 
+	// 停止 tun2socks
+	if s.tun2socks != nil {
+		s.tun2socks.Stop()
+	}
+
 	// 恢复路由表
 	if s.routeMgr != nil {
 		s.routeMgr.RestoreRoutes(s.ctx)
-	}
-
-	// 关闭TUN设备
-	if s.device != nil {
-		s.device.Down()
-		s.device.Close()
-	}
-
-	// 释放网络
-	if s.ipAllocator != nil && s.device != nil {
-		// 获取设备网络信息
-		// 这里简化处理，实际应该从配置中获取
 	}
 
 	logger.Info(s.ctx, map[string]interface{}{
@@ -197,59 +157,17 @@ func (s *Service) Stop() error {
 	return nil
 }
 
-// configureDeviceIP 配置设备IP地址（平台特定）
-func configureDeviceIP(device Device, cfg *Config) error {
-	name := device.Name()
-	if name == "" {
-		return fmt.Errorf("device name is empty")
-	}
-
-	ipAddr := cfg.Address
-	if ipAddr == nil {
-		ipAddr = net.ParseIP("10.0.0.1")
-	}
-	if ipAddr.To4() == nil {
-		return fmt.Errorf("only IPv4 is supported")
-	}
-
-	prefixLen := 24
-	if cfg.Netmask != nil {
-		if ones, _ := cfg.Netmask.Size(); ones > 0 {
-			prefixLen = ones
-		}
-	}
-
-	switch runtime.GOOS {
-	case "windows":
-		// Windows 在 tun_windows.go 中已经通过 netsh 配置过 IP，这里不重复配置
-		return nil
-
-	case "linux":
-		// 使用 ip 命令配置：ip addr add <ip>/<prefix> dev <name>
-		cidr := fmt.Sprintf("%s/%d", ipAddr.String(), prefixLen)
-		cmd := exec.Command("ip", "addr", "add", cidr, "dev", name)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("linux: failed to add addr %s on %s: %w, output: %s", cidr, name, err, string(out))
-		}
-		// 启动接口：ip link set <name> up
-		cmd = exec.Command("ip", "link", "set", name, "up")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("linux: failed to set link up on %s: %w, output: %s", name, err, string(out))
-		}
-		return nil
-
-	case "darwin":
-		// macOS 使用 ifconfig 配置：ifconfig <name> inet <ip> <ip> netmask <mask> up
-		mask := net.CIDRMask(prefixLen, 32)
-		maskIP := net.IP(mask).String()
-		cmd := exec.Command("ifconfig", name, "inet", ipAddr.String(), ipAddr.String(), "netmask", maskIP, "up")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("darwin: failed to configure %s: %w, output: %s", name, err, string(out))
-		}
-		return nil
-
-	default:
-		// 其他平台暂不支持
+// getOriginalInterfaceIP 获取原默认接口的 IP 地址
+func getOriginalInterfaceIP() net.IP {
+	// 尝试连接一个公共 IP 来确定默认出口接口
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
 		return nil
 	}
+	defer conn.Close()
+
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	return localAddr.IP
 }
+
+// isAdmin 和 elevatePrivileges 在 admin_windows.go 和 admin_other.go 中定义

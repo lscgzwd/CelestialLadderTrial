@@ -17,5 +17,3 @@ func isAdmin() bool {
 func elevatePrivileges() error {
 	return fmt.Errorf("automatic privilege elevation is not supported on this platform, please run with sudo or as root")
 }
-
-
