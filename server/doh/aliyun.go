@@ -4,10 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
 	"strings"
+	"time"
 
-	"github.com/likexian/gokit/xhttp"
 	"github.com/likexian/gokit/xip"
+	"proxy/server/common"
 )
 
 type AliyunProvider struct {
@@ -56,10 +61,10 @@ func (c *AliyunProvider) ECSQuery(ctx context.Context, d Domain, t Type, s ECS) 
 		return nil, err
 	}
 
-	param := xhttp.QueryParam{
-		"name": name,
-		"type": strings.TrimSpace(string(t)),
-	}
+	// 构建请求参数
+	params := url.Values{}
+	params.Set("name", name)
+	params.Set("type", strings.TrimSpace(string(t)))
 
 	ss := strings.TrimSpace(string(s))
 	if ss != "" {
@@ -67,21 +72,46 @@ func (c *AliyunProvider) ECSQuery(ctx context.Context, d Domain, t Type, s ECS) 
 		if err != nil {
 			return nil, err
 		}
-		param["edns_client_subnet"] = ss
+		params.Set("edns_client_subnet", ss)
 	}
 
-	rsp, err := xhttp.New().Get(ctx, Upstream[c.provides], param, xhttp.Header{"accept": "application/dns-json"})
+	// 创建绑定到原始接口的 HTTP 客户端，确保 DoH 查询不走 TUN
+	dialer := common.GetOriginalInterfaceDialer()
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return dialer.DialContext(ctx, network, addr)
+		},
+		// 不使用代理
+		Proxy: nil,
+	}
+	httpClient := &http.Client{
+		Transport: transport,
+		Timeout:   10 * time.Second,
+	}
+
+	// 构建请求 URL
+	reqURL := Upstream[c.provides] + "?" + params.Encode()
+
+	// 创建请求
+	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	// bt, _ := io.ReadAll(rsp.Response.Body)
-	// fmt.Printf("%s", string(bt))
-	defer rsp.Close()
-	buf, err := rsp.Bytes()
+	req.Header.Set("Accept", "application/dns-json")
+
+	// 发送请求
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
-	// fmt.Printf("%s", string(buf))
+	defer resp.Body.Close()
+
+	// 读取响应
+	buf, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
 	rr := &Response{
 		Provider: c.String(),
 	}
@@ -91,7 +121,7 @@ func (c *AliyunProvider) ECSQuery(ctx context.Context, d Domain, t Type, s ECS) 
 	}
 
 	if rr.Status != 0 {
-		return rr, fmt.Errorf("doh: cloudflare: failed response code %d", rr.Status)
+		return rr, fmt.Errorf("doh: aliyun: failed response code %d", rr.Status)
 	}
 
 	return rr, nil

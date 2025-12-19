@@ -115,15 +115,19 @@ func NewService() (*Service, error) {
 	}
 
 	// 创建路由管理器
-	routeMgr := route.NewRouteManager(device.Name())
+	routeMgr := route.NewRouteManager(device.Name(), gatewayIP.String())
+	
+	// 设置全局路由管理器，供 TUN handler 使用
+	route.SetGlobalRouteManager(routeMgr)
 
-	// 备份路由表
+	// 备份路由表（此时 TUN 还未接管流量，DNS 查询正常）
 	if err := routeMgr.BackupRoutes(ctx); err != nil {
 		device.Close()
 		return nil, fmt.Errorf("failed to backup routes: %w", err)
 	}
 
-	// 配置路由表
+	// 配置路由表（包括为远程服务器添加直连路由）
+	// 注意：必须在 TUN 启动前配置，确保远程服务器路由已添加
 	if err := routeMgr.SetupRoutes(ctx); err != nil {
 		device.Close()
 		routeMgr.RestoreRoutes(ctx)

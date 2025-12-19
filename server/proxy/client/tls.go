@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"net"
 	"time"
 
 	"github.com/go-errors/errors"
@@ -34,7 +33,9 @@ func (r *TlsRemote) Handshake(ctx *context.Context, target *common.TargetAddr) (
 			fmt.Println(string(errors.Wrap(err, 3).Stack()))
 		}
 	}()
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%s", config.Config.Out.RemoteAddr, "443"), 10*time.Second)
+	// 使用绑定到原默认接口的 Dialer，确保不走 TUN
+	dialer := common.GetOriginalInterfaceDialer()
+	conn, err := dialer.Dial("tcp", fmt.Sprintf("%s:%s", config.Config.Out.RemoteAddr, "443"))
 	if nil != err {
 		return nil, err
 	}

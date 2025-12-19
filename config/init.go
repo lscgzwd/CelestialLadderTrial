@@ -85,7 +85,8 @@ func init() {
 			fmt.Printf("启动配置文件监控失败：%+v\n", err)
 		}
 	}
-	if Config.In.Type == ServerTypeTLS {
+	// TLS 服务 (type=3) 和 WSS 服务 (type=4) 都需要配置 TLS 证书
+	if Config.In.Type == ServerTypeTLS || Config.In.Type == ServerTypeWSS {
 		if len(Config.In.ServerName) < 3 {
 			fmt.Printf("domain is wrong：%s", Config.In.ServerName)
 			os.Exit(1)

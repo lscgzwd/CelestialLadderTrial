@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"time"
 
@@ -33,14 +34,24 @@ func (r *WSSRemote) Handshake(ctx *context.Context, target *common.TargetAddr) (
 			})
 		}
 	}()
-	websocket.DefaultDialer.TLSClientConfig = &tls.Config{
-		ServerName:         config.Config.Out.RemoteAddr,
-		ClientSessionCache: tls.NewLRUClientSessionCache(128),
-		MinVersion:         tls.VersionTLS13,
-		MaxVersion:         tls.VersionTLS13,
+	// 使用绑定到原默认接口的 Dialer，确保不走 TUN
+	dialer := common.GetOriginalInterfaceDialer()
+	
+	// 创建自定义 Dialer，绑定到原接口
+	wsDialer := &websocket.Dialer{
+		NetDial: func(network, addr string) (net.Conn, error) {
+			return dialer.Dial(network, addr)
+		},
+		TLSClientConfig: &tls.Config{
+			ServerName:         config.Config.Out.RemoteAddr,
+			ClientSessionCache: tls.NewLRUClientSessionCache(128),
+			MinVersion:         tls.VersionTLS13,
+			MaxVersion:         tls.VersionTLS13,
+		},
 	}
+	
 	u := url.URL{Scheme: "wss", Host: fmt.Sprintf("%s:%s", config.Config.Out.RemoteAddr, "443"), Path: "/"}
-	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	c, _, err := wsDialer.Dial(u.String(), nil)
 	if nil != err {
 		return nil, err
 	}

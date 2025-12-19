@@ -21,6 +21,9 @@ type Handler struct {
 	dnsHandler  *DNSHandler
 	mu          sync.RWMutex
 	ctx         *context.Context
+	maxConns    int // 最大并发连接数
+	connCount   int // 当前连接数
+	connCountMu sync.Mutex
 }
 
 // Connection TUN连接
@@ -44,6 +47,7 @@ func NewHandler(device Device, socks5Addr string) *Handler {
 		connections: make(map[string]*Connection),
 		dnsHandler:  NewDNSHandler(),
 		ctx:         context.NewContext(),
+		maxConns:    1000, // 最大并发连接数，防止 goroutine 爆炸
 	}
 }
 
@@ -89,6 +93,11 @@ func (h *Handler) Start() error {
 
 // handlePacket 处理IP数据包
 func (h *Handler) handlePacket(ipPkt *IPPacket) {
+	// 过滤掉不应该处理的包
+	if !h.shouldHandle(ipPkt) {
+		return
+	}
+
 	// 只处理TCP和UDP
 	if ipPkt.Protocol != IPProtocolTCP && ipPkt.Protocol != IPProtocolUDP {
 		return
@@ -119,12 +128,29 @@ func (h *Handler) handlePacket(ipPkt *IPPacket) {
 	h.mu.RUnlock()
 
 	if !exists {
+		// 检查连接数限制
+		h.connCountMu.Lock()
+		if h.connCount >= h.maxConns {
+			h.connCountMu.Unlock()
+			logger.Warn(h.ctx, map[string]interface{}{
+				"action": config.ActionRequestBegin,
+				"count":   h.connCount,
+				"max":     h.maxConns,
+			}, "max connections reached, dropping packet")
+			return
+		}
+		h.connCount++
+		h.connCountMu.Unlock()
+
 		// 检查是否是TCP SYN包（新连接）
 		if ipPkt.Protocol == IPProtocolTCP {
 			tcpPkt, err := ParseTCPPacket(ipPkt.Data)
 			if err == nil {
 				// 只处理SYN包（Flags & 0x02 == SYN）
 				if (tcpPkt.Flags & 0x02) == 0 {
+					h.connCountMu.Lock()
+					h.connCount--
+					h.connCountMu.Unlock()
 					return // 不是SYN包，忽略
 				}
 			}
@@ -134,6 +160,9 @@ func (h *Handler) handlePacket(ipPkt *IPPacket) {
 		var err error
 		conn, err = h.createConnection(ipPkt)
 		if err != nil {
+			h.connCountMu.Lock()
+			h.connCount--
+			h.connCountMu.Unlock()
 			logger.Error(h.ctx, map[string]interface{}{
 				"action":    config.ActionRequestBegin,
 				"errorCode": logger.ErrCodeHandshake,
@@ -323,6 +352,11 @@ func (h *Handler) forwardSocks5ToTun(conn *Connection) {
 	delete(h.connections, conn.ID)
 	h.mu.Unlock()
 
+	// 减少连接计数
+	h.connCountMu.Lock()
+	h.connCount--
+	h.connCountMu.Unlock()
+
 	conn.mu.Lock()
 	if closeConn, ok := conn.conn.(io.Closer); ok && closeConn != nil {
 		closeConn.Close()
@@ -348,5 +382,68 @@ func (h *Handler) getConnectionID(ipPkt *IPPacket) string {
 		}
 	}
 	return fmt.Sprintf("%s-%s-%d", ipPkt.SrcIP.String(), ipPkt.DstIP.String(), ipPkt.Protocol)
+}
+
+// shouldHandle 判断是否应该处理这个数据包
+func (h *Handler) shouldHandle(ipPkt *IPPacket) bool {
+	dstIP := ipPkt.DstIP
+
+	// 过滤本地回环地址（127.0.0.0/8）
+	if dstIP.IsLoopback() {
+		return false
+	}
+
+	// 过滤源地址是回环地址的包
+	if ipPkt.SrcIP != nil && ipPkt.SrcIP.IsLoopback() {
+		return false
+	}
+
+	// 过滤广播地址（255.255.255.255）
+	if dstIP.Equal(net.IPv4bcast) {
+		return false
+	}
+
+	// 过滤组播地址（224.0.0.0/4）
+	if len(dstIP) >= 1 && dstIP[0] >= 224 && dstIP[0] <= 239 {
+		return false
+	}
+
+	// 过滤链路本地地址（169.254.0.0/16）
+	if len(dstIP) >= 2 && dstIP[0] == 169 && dstIP[1] == 254 {
+		return false
+	}
+
+	// 过滤私有网络地址 - 这些应该走本地路由，不走 TUN
+	// 10.0.0.0/8 - 但排除 TUN 自己的地址（10.0.0.x）
+	if len(dstIP) >= 2 && dstIP[0] == 10 {
+		// 如果是 TUN 的网段（10.0.0.0/24），则应该处理
+		// 其他 10.x.x.x 地址不处理（走本地路由）
+		if dstIP[1] != 0 || dstIP[2] != 0 {
+			return false
+		}
+	}
+
+	// 172.16.0.0/12 - 私有网络，不走 TUN
+	if len(dstIP) >= 2 && dstIP[0] == 172 && dstIP[1] >= 16 && dstIP[1] <= 31 {
+		return false
+	}
+
+	// 192.168.0.0/16 - 私有网络，不走 TUN
+	if len(dstIP) >= 2 && dstIP[0] == 192 && dstIP[1] == 168 {
+		return false
+	}
+
+	// 过滤子网广播地址
+	if len(dstIP) >= 4 && dstIP[3] == 255 {
+		return false
+	}
+
+	// 检查是否是远程服务器地址（应该走直连路由，不应该进入TUN）
+	routeMgr := route.GetGlobalRouteManager()
+	if routeMgr != nil && routeMgr.IsRemoteServerIP(dstIP) {
+		return false
+	}
+
+	return true
 }
 

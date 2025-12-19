@@ -3,7 +3,6 @@ package client
 import (
 	"io"
 	"net"
-	"time"
 
 	"proxy/config"
 	"proxy/server/common"
@@ -28,19 +27,34 @@ func (r *DirectRemote) Handshake(ctx *context.Context, target *common.TargetAddr
 			})
 		}
 	}()
+	
+	// 使用绑定到原默认接口的 Dialer，确保不走 TUN
+	dialer := common.GetOriginalInterfaceDialer()
+	
 	switch target.Proto {
 	case 3:
 		udpAddr := &net.UDPAddr{IP: target.IP, Port: target.Port}
 		target.RUdpAddr = udpAddr
 
-		udpConn, err := net.DialUDP("udp", nil, udpAddr)
+		// UDP 也需要绑定到原接口
+		var localAddr *net.UDPAddr
+		if dialer.LocalAddr != nil {
+			if tcpAddr, ok := dialer.LocalAddr.(*net.TCPAddr); ok {
+				localAddr = &net.UDPAddr{
+					IP:   tcpAddr.IP,
+					Port: 0, // 系统自动分配端口
+				}
+			}
+		}
+		
+		udpConn, err := net.DialUDP("udp", localAddr, udpAddr)
 		if nil != err {
 			return nil, err
 		}
 		target.RUdpConn = udpConn
 		return udpConn, nil
 	default:
-		return net.DialTimeout("tcp", target.String(), 10*time.Second)
+		return dialer.Dial("tcp", target.String())
 	}
 }
 func (r *DirectRemote) Name() string {

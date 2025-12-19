@@ -31,7 +31,10 @@ type BackupData struct {
 
 // WindowsBackup Windows备份数据
 type WindowsBackup struct {
-	Proxy string `json:"proxy"`
+	WinHTTPProxy  string `json:"winhttp_proxy"`            // WinHTTP 代理
+	ProxyEnable   string `json:"proxy_enable,omitempty"`   // WinINET: ProxyEnable (REG_DWORD)
+	ProxyServer   string `json:"proxy_server,omitempty"`   // WinINET: ProxyServer (REG_SZ)
+	ProxyOverride string `json:"proxy_override,omitempty"` // WinINET: ProxyOverride (REG_SZ)
 }
 
 // DarwinBackup macOS备份数据
@@ -139,6 +142,8 @@ func backup(ctx *context.Context) error {
 
 // backupWindows 备份Windows代理配置
 func backupWindows(ctx *context.Context) error {
+	backup := &WindowsBackup{}
+
 	cmd := exec.Command("netsh", "winhttp", "show", "proxy")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -187,10 +192,61 @@ func backupWindows(ctx *context.Context) error {
 		}
 	}
 
-	backupData.Windows = &WindowsBackup{
-		Proxy: proxy,
+	backup.WinHTTPProxy = proxy
+
+	// 备份 WinINET 代理（系统设置里的“使用代理服务器”）
+	const regPath = `HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings`
+
+	// ProxyEnable
+	cmd = exec.Command("reg", "query", regPath, "/v", "ProxyEnable")
+	if out, err := cmd.CombinedOutput(); err == nil {
+		lines := strings.Split(string(out), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "ProxyEnable") {
+				fields := strings.Fields(line)
+				if len(fields) >= 3 {
+					backup.ProxyEnable = fields[len(fields)-1]
+				}
+				break
+			}
+		}
 	}
 
+	// ProxyServer
+	cmd = exec.Command("reg", "query", regPath, "/v", "ProxyServer")
+	if out, err := cmd.CombinedOutput(); err == nil {
+		lines := strings.Split(string(out), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "ProxyServer") {
+				// 格式: ProxyServer    REG_SZ    127.0.0.1:8080
+				fields := strings.Fields(line)
+				if len(fields) >= 3 {
+					backup.ProxyServer = strings.Join(fields[2:], " ")
+				}
+				break
+			}
+		}
+	}
+
+	// ProxyOverride
+	cmd = exec.Command("reg", "query", regPath, "/v", "ProxyOverride")
+	if out, err := cmd.CombinedOutput(); err == nil {
+		lines := strings.Split(string(out), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "ProxyOverride") {
+				fields := strings.Fields(line)
+				if len(fields) >= 3 {
+					backup.ProxyOverride = strings.Join(fields[2:], " ")
+				}
+				break
+			}
+		}
+	}
+
+	backupData.Windows = backup
 	return saveBackup()
 }
 
@@ -200,16 +256,38 @@ func restoreWindows(ctx *context.Context) {
 		return
 	}
 
-	if backupData.Windows.Proxy == "" {
-		// 清除代理
+	// 恢复 WinHTTP 代理
+	if backupData.Windows.WinHTTPProxy == "" {
 		exec.Command("netsh", "winhttp", "reset", "proxy").Run()
 	} else {
-		// 恢复代理
-		exec.Command("netsh", "winhttp", "set", "proxy", backupData.Windows.Proxy).Run()
+		exec.Command("netsh", "winhttp", "set", "proxy", backupData.Windows.WinHTTPProxy).Run()
+	}
+
+	// 恢复 WinINET 代理（系统设置）
+	const regPath = `HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings`
+
+	// ProxyEnable
+	if backupData.Windows.ProxyEnable != "" {
+		exec.Command("reg", "add", regPath, "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", backupData.Windows.ProxyEnable, "/f").Run()
+	}
+
+	// ProxyServer
+	if backupData.Windows.ProxyServer != "" {
+		exec.Command("reg", "add", regPath, "/v", "ProxyServer", "/t", "REG_SZ", "/d", backupData.Windows.ProxyServer, "/f").Run()
+	} else {
+		// 清空
+		exec.Command("reg", "delete", regPath, "/v", "ProxyServer", "/f").Run()
+	}
+
+	// ProxyOverride
+	if backupData.Windows.ProxyOverride != "" {
+		exec.Command("reg", "add", regPath, "/v", "ProxyOverride", "/t", "REG_SZ", "/d", backupData.Windows.ProxyOverride, "/f").Run()
+	} else {
+		exec.Command("reg", "delete", regPath, "/v", "ProxyOverride", "/f").Run()
 	}
 }
 
-// applyWindows 使用 netsh 配置 WinHTTP 代理（影响系统级 HTTP/HTTPS 请求）
+// applyWindows 配置 WinHTTP + WinINET 代理
 func applyWindows(ctx *context.Context, port int) {
 	proxy := "127.0.0.1:" + strconv.Itoa(port)
 
@@ -225,11 +303,21 @@ func applyWindows(ctx *context.Context, port int) {
 		return
 	}
 
+	// 设置 WinINET 代理（系统“使用代理服务器”）
+	const regPath = `HKCU\Software\Windows\CurrentVersion\Internet Settings`
+	// 注意：这里路径写错会失败，我们使用正确路径：
+	const regPathCorrect = `HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings`
+
+	// 开启代理
+	exec.Command("reg", "add", regPathCorrect, "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "1", "/f").Run()
+	// 设置代理服务器
+	exec.Command("reg", "add", regPathCorrect, "/v", "ProxyServer", "/t", "REG_SZ", "/d", proxy, "/f").Run()
+
 	logger.Info(ctx, map[string]interface{}{
 		"action": "SystemProxy",
 		"os":     "windows",
 		"proxy":  proxy,
-	}, "WinHTTP proxy configured")
+	}, "WinHTTP + WinINET proxy configured")
 }
 
 // backupDarwin 备份macOS代理配置
