@@ -1,43 +1,76 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"proxy/config"
 	"proxy/server"
 	_ "proxy/server"
-	"proxy/utils/context"
+	utilContext "proxy/utils/context"
 	"proxy/utils/logger"
 )
 
 func main() {
-	gCtx := context.NewContext()
-	// wait for interrupt signal to gracefully shut down the server with
-	// a timeout of 10 seconds.
+	gCtx := utilContext.NewContext()
+
+	// 创建一个可取消的上下文用于优雅关闭
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 等待中断信号
 	quit := make(chan os.Signal, 1)
-	done := make(chan bool, 1)
-	// kill (no param) default send syscall.SIGTERM
-	// kill -2 is syscall.SIGINT
-	// kill -9 is syscall.SIGKILL but can't be caught, so don't need to add it
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	// 信号处理
 	go func() {
-		<-quit
+		sig := <-quit
 		logger.Info(gCtx, map[string]interface{}{
 			"action": config.ActionRuntime,
-		}, "Server Shutdown...")
-		// 停止TUN服务
-		server.StopTunService()
-		// 恢复系统代理配置
-		if config.Config.SystemProxy.Enable {
-			server.RestoreSystemProxy(gCtx)
+			"signal": sig.String(),
+		}, "Received shutdown signal, gracefully shutting down...")
+
+		// 设置关闭超时上下文
+		shutdownCtx, shutdownCancel := context.WithTimeout(ctx, 30*time.Second)
+		defer shutdownCancel()
+
+		// 创建关闭完成通道
+		shutdownDone := make(chan struct{})
+
+		go func() {
+			// 停止 TUN 服务
+			server.StopTunService()
+
+			// 恢复系统代理配置
+			if config.Config.SystemProxy.Enable {
+				server.RestoreSystemProxy(gCtx)
+			}
+
+			close(shutdownDone)
+		}()
+
+		// 等待关闭完成或超时
+		select {
+		case <-shutdownDone:
+			logger.Info(gCtx, map[string]interface{}{
+				"action": config.ActionRuntime,
+			}, "Graceful shutdown completed")
+		case <-shutdownCtx.Done():
+			logger.Warn(gCtx, map[string]interface{}{
+				"action": config.ActionRuntime,
+			}, "Shutdown timeout, forcing exit")
 		}
-		done <- true
+
+		cancel() // 通知主 goroutine 退出
 	}()
-	<-done
+
+	// 阻塞直到收到取消信号
+	<-ctx.Done()
+
 	logger.Info(gCtx, map[string]interface{}{
 		"action": config.ActionRuntime,
-	}, "Server exiting")
-
+	}, "Server exited")
 }

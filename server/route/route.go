@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -104,22 +105,46 @@ func init() {
 			}
 		}
 	}
+
+	// 对每个 IP 段列表按 Min 排序，便于二分查找
+	for k, list := range cnIp {
+		sort.Slice(list, func(i, j int) bool {
+			return list[i].Min < list[j].Min
+		})
+		cnIp[k] = list
+	}
 }
 
 // IsCnIp determine chinese ip
+// 使用二分查找优化性能（O(log n) 替代 O(n)）
 func IsCnIp(ctx *context.Context, ip string) bool {
 	segs := strings.Split(ip, ".")
-	first, _ := strconv.ParseUint(segs[0], 10, 64)
-	list, exist := cnIp[uint8(first)]
-	if !exist {
+	if len(segs) != 4 {
 		return false
 	}
-	min := helper.Ip2long(ip)
-	for _, v := range list {
-		if min >= v.Min && min <= v.Max {
+	first, err := strconv.ParseUint(segs[0], 10, 64)
+	if err != nil {
+		return false
+	}
+	list, exist := cnIp[uint8(first)]
+	if !exist || len(list) == 0 {
+		return false
+	}
+	ipNum := helper.Ip2long(ip)
+	
+	// 二分查找：找到第一个 Min > ipNum 的位置
+	idx := sort.Search(len(list), func(i int) bool {
+		return list[i].Min > ipNum
+	})
+	
+	// 如果 idx > 0，检查前一个范围是否包含该 IP
+	if idx > 0 {
+		prev := list[idx-1]
+		if ipNum >= prev.Min && ipNum <= prev.Max {
 			return true
 		}
 	}
+	
 	return false
 }
 func GetRemote(ctx *context.Context, target *common.TargetAddr) common.Remote {
@@ -178,13 +203,20 @@ func GetRemote(ctx *context.Context, target *common.TargetAddr) common.Remote {
 			}
 			rsp, err := c.ECSQuery(ctxCancel, doh.Domain(target.Name), doh.TypeA, doh.ECS(subnet))
 			if nil != err {
-				// doh err , return direct
+				// DoH 查询失败时，走代理（保守策略，避免直连被阻断）
 				logger.Error(ctx, map[string]interface{}{
 					"action":    config.ActionSocketOperate,
 					"errorCode": logger.ErrCodeHandshake,
 					"error":     err,
-				}, "ECSQuery")
-				return &client.DirectRemote{}
+				}, "ECSQuery failed, using proxy")
+				switch config.Config.Out.Type {
+				case config.RemoteTypeTLS:
+					return &client.TlsRemote{}
+				case config.RemoteTypeWSS:
+					return &client.WSSRemote{}
+				default:
+					return &client.DirectRemote{}
+				}
 			}
 			var ip string
 			for _, v := range rsp.Answer {
@@ -204,16 +236,16 @@ func GetRemote(ctx *context.Context, target *common.TargetAddr) common.Remote {
 				if IsCnIp(ctx, ip) {
 					return &client.DirectRemote{}
 				}
-				switch config.Config.Out.Type {
-				case config.RemoteTypeTLS:
-					return &client.TlsRemote{}
-				case config.RemoteTypeWSS:
-					return &client.WSSRemote{}
-				default:
-					return &client.DirectRemote{}
-				}
 			}
-			return &client.DirectRemote{}
+			// 非中国 IP 或无法判断时，走代理
+			switch config.Config.Out.Type {
+			case config.RemoteTypeTLS:
+				return &client.TlsRemote{}
+			case config.RemoteTypeWSS:
+				return &client.WSSRemote{}
+			default:
+				return &client.DirectRemote{}
+			}
 		}
 	} else {
 		// local network or chinese ip

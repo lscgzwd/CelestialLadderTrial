@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/likexian/gokit/xip"
@@ -17,6 +18,7 @@ import (
 
 type AliyunProvider struct {
 	provides int
+	client   *http.Client
 }
 
 const (
@@ -29,12 +31,43 @@ var (
 	Upstream = map[int]string{
 		DefaultProvides: "https://dns.alidns.com/resolve",
 	}
+
+	// 全局单例 DoH 提供者，复用 HTTP 客户端
+	globalProvider     *AliyunProvider
+	globalProviderOnce sync.Once
 )
 
-// New returns a new cloudflare provider client
+// New returns the global singleton AliyunProvider
+// 使用单例模式，复用 HTTP 客户端以提高性能
 func New() *AliyunProvider {
-	return &AliyunProvider{
-		provides: DefaultProvides,
+	globalProviderOnce.Do(func() {
+		globalProvider = &AliyunProvider{
+			provides: DefaultProvides,
+			client:   createHTTPClient(),
+		}
+	})
+	return globalProvider
+}
+
+// createHTTPClient 创建绑定到原接口的 HTTP 客户端
+// 只创建一次，复用连接池
+func createHTTPClient() *http.Client {
+	dialer := common.GetOriginalInterfaceDialer()
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return dialer.DialContext(ctx, network, addr)
+		},
+		Proxy:                 nil, // 不使用代理
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   10,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		ForceAttemptHTTP2:     true,
+	}
+	return &http.Client{
+		Transport: transport,
+		Timeout:   10 * time.Second,
 	}
 }
 
@@ -61,6 +94,15 @@ func (c *AliyunProvider) ECSQuery(ctx context.Context, d Domain, t Type, s ECS) 
 		return nil, err
 	}
 
+	// 构建缓存 key
+	cacheKey := fmt.Sprintf("%s:%s:%s", name, string(t), string(s))
+
+	// 检查缓存
+	cache := GetCache()
+	if cached, ok := cache.Get(cacheKey); ok {
+		return cached, nil
+	}
+
 	// 构建请求参数
 	params := url.Values{}
 	params.Set("name", name)
@@ -75,20 +117,6 @@ func (c *AliyunProvider) ECSQuery(ctx context.Context, d Domain, t Type, s ECS) 
 		params.Set("edns_client_subnet", ss)
 	}
 
-	// 创建绑定到原始接口的 HTTP 客户端，确保 DoH 查询不走 TUN
-	dialer := common.GetOriginalInterfaceDialer()
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return dialer.DialContext(ctx, network, addr)
-		},
-		// 不使用代理
-		Proxy: nil,
-	}
-	httpClient := &http.Client{
-		Transport: transport,
-		Timeout:   10 * time.Second,
-	}
-
 	// 构建请求 URL
 	reqURL := Upstream[c.provides] + "?" + params.Encode()
 
@@ -99,8 +127,8 @@ func (c *AliyunProvider) ECSQuery(ctx context.Context, d Domain, t Type, s ECS) 
 	}
 	req.Header.Set("Accept", "application/dns-json")
 
-	// 发送请求
-	resp, err := httpClient.Do(req)
+	// 发送请求（使用复用的 HTTP 客户端）
+	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -123,6 +151,13 @@ func (c *AliyunProvider) ECSQuery(ctx context.Context, d Domain, t Type, s ECS) 
 	if rr.Status != 0 {
 		return rr, fmt.Errorf("doh: aliyun: failed response code %d", rr.Status)
 	}
+
+	// 从响应中获取 TTL，设置缓存
+	var ttl time.Duration = 300 * time.Second // 默认 5 分钟
+	if len(rr.Answer) > 0 && rr.Answer[0].TTL > 0 {
+		ttl = time.Duration(rr.Answer[0].TTL) * time.Second
+	}
+	cache.Set(cacheKey, rr, ttl)
 
 	return rr, nil
 }

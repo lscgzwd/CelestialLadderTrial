@@ -9,12 +9,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
 	"proxy/config"
 	"proxy/server/common"
 	"proxy/server/route"
 	"proxy/utils/context"
 	"proxy/utils/logger"
+
+	"github.com/pkg/errors"
 )
 
 // https://www.ietf.org/rfc/rfc1928.txt
@@ -52,17 +53,19 @@ type SocketServer struct {
 func (s *SocketServer) Start(l net.Listener) {
 	for {
 		conn, err := l.Accept()
-		go func() {
+		if err != nil {
+			// Accept 错误时 conn 可能为 nil，不要进入 goroutine
+			gCtx := context.NewContext()
+			logger.Error(gCtx, map[string]interface{}{
+				"action":    config.ActionRequestBegin,
+				"errorCode": logger.ErrCodeHandshake,
+				"error":     err,
+			}, "accept connection failed")
+			continue
+		}
+		go func(conn net.Conn) {
 			defer conn.Close()
 			gCtx := context.NewContext()
-			if nil != err {
-				logger.Error(gCtx, map[string]interface{}{
-					"action":    config.ActionRequestBegin,
-					"errorCode": logger.ErrCodeHandshake,
-					"error":     err,
-				})
-				return
-			}
 			wConn, target, err := s.Handshake(gCtx, conn)
 			if nil != err {
 				logger.Error(gCtx, map[string]interface{}{
@@ -86,12 +89,13 @@ func (s *SocketServer) Start(l net.Listener) {
 				return
 			}
 			defer func() {
-				_ = wConn.(net.Conn).Close()
-				switch rConn.(type) {
-				case net.Conn:
-					_ = rConn.(net.Conn).Close()
-				case *common.Chacha20Stream:
-					_ = rConn.(*common.Chacha20Stream).Close()
+				// 安全关闭 wConn
+				if closer, ok := wConn.(io.Closer); ok {
+					_ = closer.Close()
+				}
+				// 安全关闭 rConn
+				if closer, ok := rConn.(io.Closer); ok {
+					_ = closer.Close()
 				}
 			}()
 			if target.Proto == 3 {
@@ -165,9 +169,10 @@ func (s *SocketServer) Start(l net.Listener) {
 					}
 				}
 			}
-		}()
+		}(conn)
 	}
 }
+
 func (s *SocketServer) Handshake(ctx *context.Context, conn net.Conn) (io.ReadWriter, *common.TargetAddr, error) {
 	// 在函数退出前，执行defer
 	// 捕捉异常后，程序不会异常退出
@@ -475,6 +480,7 @@ func (s *SocketServer) handleHTTPForward(ctx *context.Context, conn net.Conn, in
 }
 
 // prefixedReadWriter 包装连接，在第一次读取时返回预设的前缀数据
+// 实现 io.ReadWriteCloser 接口
 type prefixedReadWriter struct {
 	prefix []byte
 	conn   net.Conn
@@ -492,4 +498,33 @@ func (p *prefixedReadWriter) Read(b []byte) (int, error) {
 
 func (p *prefixedReadWriter) Write(b []byte) (int, error) {
 	return p.conn.Write(b)
+}
+
+func (p *prefixedReadWriter) Close() error {
+	return p.conn.Close()
+}
+
+// LocalAddr 返回本地地址（实现 net.Conn 接口）
+func (p *prefixedReadWriter) LocalAddr() net.Addr {
+	return p.conn.LocalAddr()
+}
+
+// RemoteAddr 返回远程地址（实现 net.Conn 接口）
+func (p *prefixedReadWriter) RemoteAddr() net.Addr {
+	return p.conn.RemoteAddr()
+}
+
+// SetDeadline 设置读写超时（实现 net.Conn 接口）
+func (p *prefixedReadWriter) SetDeadline(t time.Time) error {
+	return p.conn.SetDeadline(t)
+}
+
+// SetReadDeadline 设置读超时（实现 net.Conn 接口）
+func (p *prefixedReadWriter) SetReadDeadline(t time.Time) error {
+	return p.conn.SetReadDeadline(t)
+}
+
+// SetWriteDeadline 设置写超时（实现 net.Conn 接口）
+func (p *prefixedReadWriter) SetWriteDeadline(t time.Time) error {
+	return p.conn.SetWriteDeadline(t)
 }

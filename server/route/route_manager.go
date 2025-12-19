@@ -93,10 +93,12 @@ func (rm *RouteManager) SetupRoutes(ctx *context.Context) error {
 		return fmt.Errorf("failed to add local network routes: %w", err)
 	}
 
-	// 3. 添加中国 IP 段路由（不走 TUN）
-	if err := rm.addChinaIpRoutes(ctx); err != nil {
-		return fmt.Errorf("failed to add China IP routes: %w", err)
-	}
+	// 3. 中国 IP 路由：不在路由表层面添加，改由代理程序内部判断
+	// 原因：添加大量路由太慢（1000条需要100秒），且 tun2socks 会将流量转到 SOCKS5 代理
+	// 代理内部的 IsCnIp() 函数会判断是否走直连
+	logger.Info(ctx, map[string]interface{}{
+		"action": config.ActionRuntime,
+	}, "China IP routing handled by proxy, not route table")
 
 	// 4. 添加白名单路由（不走 TUN）
 	if err := rm.addWhiteListRoutes(ctx); err != nil {
