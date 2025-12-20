@@ -253,37 +253,144 @@ func backupWindows(ctx *context.Context) error {
 // restoreWindows 恢复Windows代理配置
 func restoreWindows(ctx *context.Context) {
 	if backupData.Windows == nil {
+		logger.Warn(ctx, map[string]interface{}{
+			"action": "SystemProxy",
+		}, "no Windows backup data found, attempting to disable proxy")
+		// 如果没有备份数据，尝试禁用代理
+		exec.Command("netsh", "winhttp", "reset", "proxy").Run()
+		const regPath = `HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings`
+		exec.Command("reg", "add", regPath, "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "0", "/f").Run()
 		return
 	}
 
 	// 恢复 WinHTTP 代理
 	if backupData.Windows.WinHTTPProxy == "" {
-		exec.Command("netsh", "winhttp", "reset", "proxy").Run()
+		cmd := exec.Command("netsh", "winhttp", "reset", "proxy")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			logger.Error(ctx, map[string]interface{}{
+				"action": "SystemProxy",
+				"error":  err,
+				"output": string(out),
+			}, "failed to reset WinHTTP proxy")
+		} else {
+			logger.Info(ctx, map[string]interface{}{
+				"action": "SystemProxy",
+			}, "WinHTTP proxy reset")
+		}
 	} else {
-		exec.Command("netsh", "winhttp", "set", "proxy", backupData.Windows.WinHTTPProxy).Run()
+		cmd := exec.Command("netsh", "winhttp", "set", "proxy", backupData.Windows.WinHTTPProxy)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			logger.Error(ctx, map[string]interface{}{
+				"action": "SystemProxy",
+				"error":  err,
+				"output": string(out),
+			}, "failed to restore WinHTTP proxy")
+		} else {
+			logger.Info(ctx, map[string]interface{}{
+				"action": "SystemProxy",
+				"proxy":  backupData.Windows.WinHTTPProxy,
+			}, "WinHTTP proxy restored")
+		}
 	}
 
 	// 恢复 WinINET 代理（系统设置）
 	const regPath = `HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings`
 
-	// ProxyEnable
-	if backupData.Windows.ProxyEnable != "" {
-		exec.Command("reg", "add", regPath, "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", backupData.Windows.ProxyEnable, "/f").Run()
+	// ProxyEnable - 如果为空或为 "0"，则禁用代理
+	proxyEnable := backupData.Windows.ProxyEnable
+	if proxyEnable == "" || proxyEnable == "0" {
+		cmd := exec.Command("reg", "add", regPath, "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "0", "/f")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			logger.Error(ctx, map[string]interface{}{
+				"action": "SystemProxy",
+				"error":  err,
+				"output": string(out),
+			}, "failed to disable WinINET proxy")
+		} else {
+			logger.Info(ctx, map[string]interface{}{
+				"action": "SystemProxy",
+			}, "WinINET proxy disabled")
+		}
+	} else {
+		cmd := exec.Command("reg", "add", regPath, "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", proxyEnable, "/f")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			logger.Error(ctx, map[string]interface{}{
+				"action": "SystemProxy",
+				"error":  err,
+				"output": string(out),
+			}, "failed to restore WinINET ProxyEnable")
+		} else {
+			logger.Info(ctx, map[string]interface{}{
+				"action": "SystemProxy",
+				"value":  proxyEnable,
+			}, "WinINET ProxyEnable restored")
+		}
 	}
 
 	// ProxyServer
-	if backupData.Windows.ProxyServer != "" {
-		exec.Command("reg", "add", regPath, "/v", "ProxyServer", "/t", "REG_SZ", "/d", backupData.Windows.ProxyServer, "/f").Run()
+	if backupData.Windows.ProxyServer == "" {
+		cmd := exec.Command("reg", "delete", regPath, "/v", "ProxyServer", "/f")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			// 如果键不存在，删除会失败，这是正常的
+			if !strings.Contains(string(out), "ERROR") {
+				logger.Warn(ctx, map[string]interface{}{
+					"action": "SystemProxy",
+					"error":  err,
+					"output": string(out),
+				}, "failed to delete ProxyServer (may not exist)")
+			}
+		} else {
+			logger.Info(ctx, map[string]interface{}{
+				"action": "SystemProxy",
+			}, "WinINET ProxyServer cleared")
+		}
 	} else {
-		// 清空
-		exec.Command("reg", "delete", regPath, "/v", "ProxyServer", "/f").Run()
+		cmd := exec.Command("reg", "add", regPath, "/v", "ProxyServer", "/t", "REG_SZ", "/d", backupData.Windows.ProxyServer, "/f")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			logger.Error(ctx, map[string]interface{}{
+				"action": "SystemProxy",
+				"error":  err,
+				"output": string(out),
+			}, "failed to restore WinINET ProxyServer")
+		} else {
+			logger.Info(ctx, map[string]interface{}{
+				"action": "SystemProxy",
+				"proxy":  backupData.Windows.ProxyServer,
+			}, "WinINET ProxyServer restored")
+		}
 	}
 
 	// ProxyOverride
-	if backupData.Windows.ProxyOverride != "" {
-		exec.Command("reg", "add", regPath, "/v", "ProxyOverride", "/t", "REG_SZ", "/d", backupData.Windows.ProxyOverride, "/f").Run()
+	if backupData.Windows.ProxyOverride == "" {
+		cmd := exec.Command("reg", "delete", regPath, "/v", "ProxyOverride", "/f")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			// 如果键不存在，删除会失败，这是正常的
+			if !strings.Contains(string(out), "ERROR") {
+				logger.Warn(ctx, map[string]interface{}{
+					"action": "SystemProxy",
+					"error":  err,
+					"output": string(out),
+				}, "failed to delete ProxyOverride (may not exist)")
+			}
+		} else {
+			logger.Info(ctx, map[string]interface{}{
+				"action": "SystemProxy",
+			}, "WinINET ProxyOverride cleared")
+		}
 	} else {
-		exec.Command("reg", "delete", regPath, "/v", "ProxyOverride", "/f").Run()
+		cmd := exec.Command("reg", "add", regPath, "/v", "ProxyOverride", "/t", "REG_SZ", "/d", backupData.Windows.ProxyOverride, "/f")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			logger.Error(ctx, map[string]interface{}{
+				"action": "SystemProxy",
+				"error":  err,
+				"output": string(out),
+			}, "failed to restore WinINET ProxyOverride")
+		} else {
+			logger.Info(ctx, map[string]interface{}{
+				"action":   "SystemProxy",
+				"override": backupData.Windows.ProxyOverride,
+			}, "WinINET ProxyOverride restored")
+		}
 	}
 }
 

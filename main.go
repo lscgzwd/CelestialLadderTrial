@@ -33,6 +33,16 @@ import (
 func main() {
 	gCtx := utilContext.NewContext()
 
+	// 确保程序退出时恢复系统代理（即使异常退出）
+	defer func() {
+		if config.Config.SystemProxy.Enable {
+			logger.Info(gCtx, map[string]interface{}{
+				"action": config.ActionRuntime,
+			}, "program exiting, restoring system proxy...")
+			server.RestoreSystemProxy(gCtx)
+		}
+	}()
+
 	// 创建一个可取消的上下文用于优雅关闭
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -57,10 +67,28 @@ func main() {
 		shutdownDone := make(chan struct{})
 
 		go func() {
+			defer func() {
+				// 确保即使发生 panic 也会恢复系统代理
+				if r := recover(); r != nil {
+					logger.Error(gCtx, map[string]interface{}{
+						"action": config.ActionRuntime,
+						"error":  r,
+					}, "panic during shutdown, attempting to restore system proxy")
+				}
+				
+				// 无论是否启用 SystemProxy，都尝试恢复（防止配置丢失）
+				if config.Config.SystemProxy.Enable {
+					logger.Info(gCtx, map[string]interface{}{
+						"action": config.ActionRuntime,
+					}, "restoring system proxy settings...")
+					server.RestoreSystemProxy(gCtx)
+				}
+			}()
+
 			// 停止 TUN 服务
 			server.StopTunService()
 
-			// 恢复系统代理配置
+			// 恢复系统代理配置（必须在 TUN 停止后）
 			if config.Config.SystemProxy.Enable {
 				server.RestoreSystemProxy(gCtx)
 			}
@@ -78,6 +106,13 @@ func main() {
 			logger.Warn(gCtx, map[string]interface{}{
 				"action": config.ActionRuntime,
 			}, "Shutdown timeout, forcing exit")
+			// 超时后仍然尝试恢复系统代理
+			if config.Config.SystemProxy.Enable {
+				logger.Warn(gCtx, map[string]interface{}{
+					"action": config.ActionRuntime,
+				}, "attempting to restore system proxy before force exit")
+				server.RestoreSystemProxy(gCtx)
+			}
 		}
 
 		cancel() // 通知主 goroutine 退出
