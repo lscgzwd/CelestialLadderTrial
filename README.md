@@ -87,6 +87,7 @@ go build -o proxy.exe .
 ```
 
 > 说明：
+>
 > - `in.type`：入口类型（1: SOCKS5, 2: HTTP, 3: TLS, 4: WSS）
 > - `out.type`：出口类型（1: TLS, 2: WSS, 3: Direct）
 > - `user`：用于 Chacha20 加密的 32 字节密钥（务必自行替换）
@@ -100,6 +101,7 @@ go build -o proxy.exe .
 ```
 
 注意事项：
+
 - 启用 TUN 时需要 **管理员/root 权限**
 - Windows 下会自动尝试 UAC 提权
 - Linux/macOS 需使用 `sudo` 运行以便创建 TUN、修改路由表
@@ -229,7 +231,6 @@ go build -o proxy.exe .
 6. **DoH 与 DNS 缓存**：`server/doh/aliyun.go` + `server/doh/cache.go`
 7. **系统集成**：`server/route/route_manager.go` + `server/systemproxy/systemproxy.go`
 
-
 ---
 
 ## 🔚 最后再强调一次
@@ -240,3 +241,35 @@ go build -o proxy.exe .
 
 感谢所有参与和支持开源社区的开发者。  
 也欢迎你在阅读代码过程中提出 Issue 或 PR，一起交流学习。
+
+---
+
+## 📄 许可证
+
+本项目采用 [Apache License 2.0](LICENSE) 许可证。
+
+```
+Copyright 2024 CelestialLadderTrial Contributors
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+```
+
+**许可证要点**：
+
+- ✅ 允许商业使用、修改、分发
+- ✅ 允许私人使用
+- ✅ 允许专利使用
+- ✅ 必须包含版权声明和许可证
+- ✅ 必须声明修改的文件
+- ⚠️ 不提供任何担保
+- ⚠️ 不承担任何责任
